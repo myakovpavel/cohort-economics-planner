@@ -13,7 +13,7 @@ const MONTHS = [
   "Дек",
 ];
 
-const state = {
+const DEFAULT_STATE = {
   funnels: [
     {
       id: "core",
@@ -46,8 +46,17 @@ const state = {
   ],
 };
 
+const state = structuredClone(DEFAULT_STATE);
 const app = document.querySelector("#app");
 const heroHorizon = document.querySelector("#hero-horizon");
+const saveStatus = document.querySelector("#save-status");
+const saveMeta = document.querySelector("#save-meta");
+const saveNowButton = document.querySelector("#save-now");
+
+let isBootstrapping = true;
+let pendingSaveTimer = null;
+let latestSaveRequestId = 0;
+let latestAppliedSaveId = 0;
 
 function formatMoney(value) {
   return new Intl.NumberFormat("en-US", {
@@ -76,12 +85,106 @@ function formatPercent(value) {
   return `${value.toFixed(1)}%`;
 }
 
+function formatTimestamp(value) {
+  if (!value) {
+    return "Изменения будут общими для всей команды.";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Изменения сохранены в общей базе.";
+  }
+
+  return `Последнее сохранение: ${date.toLocaleString("ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })}`;
+}
+
+function setSaveUi(status, detail) {
+  saveStatus.textContent = status;
+  saveMeta.textContent = detail;
+}
+
 function clampPercent(value) {
   return Math.max(0, Math.min(100, Number(value) || 0));
 }
 
+function clampPositive(value) {
+  return Math.max(0, Number(value) || 0);
+}
+
 function average(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function normalizeArray(values, fallbackValues) {
+  return fallbackValues.map((fallback, index) => {
+    const candidate = Array.isArray(values) ? values[index] : fallback;
+    return clampPositive(candidate ?? fallback);
+  });
+}
+
+function normalizeRetention(values, fallbackValues) {
+  return fallbackValues.map((fallback, index) => {
+    const candidate = Array.isArray(values) ? values[index] : fallback;
+    return clampPercent(candidate ?? fallback);
+  });
+}
+
+function sanitizeFunnel(candidate, fallback) {
+  return {
+    id: fallback.id,
+    label: fallback.label,
+    note: fallback.note,
+    name: typeof candidate?.name === "string" && candidate.name.trim()
+      ? candidate.name.trim()
+      : fallback.name,
+    firstPrice: clampPositive(candidate?.firstPrice ?? fallback.firstPrice),
+    recurringPrice: clampPositive(candidate?.recurringPrice ?? fallback.recurringPrice),
+    trialConversion: clampPercent(candidate?.trialConversion ?? fallback.trialConversion),
+    month1Conversion: clampPercent(candidate?.month1Conversion ?? fallback.month1Conversion),
+    horizonMonths: Math.max(
+      12,
+      Math.min(60, Math.round(Number(candidate?.horizonMonths ?? fallback.horizonMonths) || fallback.horizonMonths)),
+    ),
+    monthlyVolume: normalizeArray(candidate?.monthlyVolume, fallback.monthlyVolume),
+    monthlyBudget: normalizeArray(candidate?.monthlyBudget, fallback.monthlyBudget),
+    retentionConversions: normalizeRetention(
+      candidate?.retentionConversions,
+      fallback.retentionConversions,
+    ),
+  };
+}
+
+function sanitizeState(candidate) {
+  return {
+    funnels: DEFAULT_STATE.funnels.map((fallback, index) =>
+      sanitizeFunnel(candidate?.funnels?.[index], fallback),
+    ),
+  };
+}
+
+function applyState(nextState) {
+  const sanitized = sanitizeState(nextState);
+  state.funnels = sanitized.funnels;
+}
+
+function serializeState() {
+  return {
+    funnels: state.funnels.map((funnel) => ({
+      id: funnel.id,
+      name: funnel.name,
+      firstPrice: funnel.firstPrice,
+      recurringPrice: funnel.recurringPrice,
+      trialConversion: funnel.trialConversion,
+      month1Conversion: funnel.month1Conversion,
+      horizonMonths: funnel.horizonMonths,
+      monthlyVolume: [...funnel.monthlyVolume],
+      monthlyBudget: [...funnel.monthlyBudget],
+      retentionConversions: [...funnel.retentionConversions],
+    })),
+  };
 }
 
 function getRetentionForAge(funnel, ageIndex) {
@@ -90,12 +193,9 @@ function getRetentionForAge(funnel, ageIndex) {
   }
 
   const monthOffset = ageIndex - 2;
-  const value =
-    funnel.retentionConversions[
-      Math.min(monthOffset, funnel.retentionConversions.length - 1)
-    ] / 100;
-
-  return value;
+  return funnel.retentionConversions[
+    Math.min(monthOffset, funnel.retentionConversions.length - 1)
+  ] / 100;
 }
 
 function calculateFunnel(funnel) {
@@ -104,12 +204,13 @@ function calculateFunnel(funnel) {
   const horizon = Math.max(12, Math.min(60, Math.round(funnel.horizonMonths)));
 
   for (let cohortIndex = 0; cohortIndex < 12; cohortIndex += 1) {
-    const incoming = Math.max(0, Number(funnel.monthlyVolume[cohortIndex]) || 0);
-    const budget = Math.max(0, Number(funnel.monthlyBudget[cohortIndex]) || 0);
+    const incoming = clampPositive(funnel.monthlyVolume[cohortIndex]);
+    const budget = clampPositive(funnel.monthlyBudget[cohortIndex]);
     const trialCount = incoming * (clampPercent(funnel.trialConversion) / 100);
-    let activePaid = trialCount * (clampPercent(funnel.month1Conversion) / 100);
+    const firstPayments = trialCount * (clampPercent(funnel.month1Conversion) / 100);
+    let activePaid = firstPayments;
     let lifetimeRevenue = activePaid * funnel.firstPrice;
-    let revenue2026 = cohortIndex < 12 ? activePaid * funnel.firstPrice : 0;
+    let revenue2026 = activePaid * funnel.firstPrice;
 
     calendarRevenue[cohortIndex] += activePaid * funnel.firstPrice;
 
@@ -128,7 +229,7 @@ function calculateFunnel(funnel) {
       cohortLabel: MONTHS[cohortIndex],
       incoming,
       trialCount,
-      firstPayments: trialCount * (clampPercent(funnel.month1Conversion) / 100),
+      firstPayments,
       lifetimeRevenue,
       revenue2026,
       budget,
@@ -137,18 +238,9 @@ function calculateFunnel(funnel) {
   }
 
   const totalRevenue2026 = calendarRevenue.reduce((sum, value) => sum + value, 0);
-  const totalBudget = funnel.monthlyBudget.reduce(
-    (sum, value) => sum + (Number(value) || 0),
-    0,
-  );
-  const totalLifetimeRevenue = cohortRows.reduce(
-    (sum, row) => sum + row.lifetimeRevenue,
-    0,
-  );
-  const totalFirstPayments = cohortRows.reduce(
-    (sum, row) => sum + row.firstPayments,
-    0,
-  );
+  const totalBudget = funnel.monthlyBudget.reduce((sum, value) => sum + clampPositive(value), 0);
+  const totalLifetimeRevenue = cohortRows.reduce((sum, row) => sum + row.lifetimeRevenue, 0);
+  const totalFirstPayments = cohortRows.reduce((sum, row) => sum + row.firstPayments, 0);
 
   return {
     horizon,
@@ -159,8 +251,7 @@ function calculateFunnel(funnel) {
     totalLifetimeRevenue,
     totalProfit2026: totalRevenue2026 - totalBudget,
     totalFirstPayments,
-    avgCAC:
-      totalFirstPayments > 0 ? totalBudget / totalFirstPayments : 0,
+    avgCAC: totalFirstPayments > 0 ? totalBudget / totalFirstPayments : 0,
     avgRevenuePerPayment:
       totalFirstPayments > 0 ? totalLifetimeRevenue / totalFirstPayments : 0,
   };
@@ -251,10 +342,7 @@ function renderCohortRows(tbody, calculation) {
 }
 
 function buildSummaryPanel(calculations) {
-  const totalRevenue = calculations.reduce(
-    (sum, item) => sum + item.totalRevenue2026,
-    0,
-  );
+  const totalRevenue = calculations.reduce((sum, item) => sum + item.totalRevenue2026, 0);
   const totalBudget = calculations.reduce((sum, item) => sum + item.totalBudget, 0);
   const totalProfit = totalRevenue - totalBudget;
   const totalLifetimeRevenue = calculations.reduce(
@@ -440,6 +528,79 @@ function updateField(funnelIndex, field, value) {
   }
 }
 
+async function fetchSharedState() {
+  const response = await fetch("/api/config", {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Load failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function persistSharedState(reason = "autosave") {
+  if (pendingSaveTimer) {
+    clearTimeout(pendingSaveTimer);
+    pendingSaveTimer = null;
+  }
+
+  latestSaveRequestId += 1;
+  const requestId = latestSaveRequestId;
+  saveNowButton.disabled = true;
+  setSaveUi("Сохранение…", reason === "manual"
+    ? "Отправляю изменения в общую базу."
+    : "Изменения автоматически сохраняются для всей команды.");
+
+  try {
+    const response = await fetch("/api/config", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        payload: serializeState(),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Save failed: ${response.status}`);
+    }
+
+    const result = await response.json();
+    if (requestId < latestAppliedSaveId) {
+      return;
+    }
+
+    latestAppliedSaveId = requestId;
+    setSaveUi("Сохранено", formatTimestamp(result.updatedAt));
+  } catch (error) {
+    console.error(error);
+    setSaveUi("Ошибка сохранения", "Проверь подключение к интернету или настройки Cloudflare.");
+  } finally {
+    saveNowButton.disabled = false;
+  }
+}
+
+function scheduleSave() {
+  if (isBootstrapping) {
+    return;
+  }
+
+  if (pendingSaveTimer) {
+    clearTimeout(pendingSaveTimer);
+  }
+
+  saveNowButton.disabled = false;
+  setSaveUi("Есть несохраненные изменения", "Через секунду обновлю общую базу данных.");
+  pendingSaveTimer = setTimeout(() => {
+    void persistSharedState("autosave");
+  }, 900);
+}
+
 document.addEventListener("change", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) {
@@ -449,6 +610,7 @@ document.addEventListener("change", (event) => {
   if (target.dataset.field) {
     updateField(Number(target.dataset.funnelIndex), target.dataset.field, target.value);
     render();
+    scheduleSave();
     return;
   }
 
@@ -463,10 +625,10 @@ document.addEventListener("change", (event) => {
 
   switch (target.dataset.action) {
     case "volume":
-      funnel.monthlyVolume[monthIndex] = Math.max(0, Number(target.value) || 0);
+      funnel.monthlyVolume[monthIndex] = clampPositive(target.value);
       break;
     case "budget":
-      funnel.monthlyBudget[monthIndex] = Math.max(0, Number(target.value) || 0);
+      funnel.monthlyBudget[monthIndex] = clampPositive(target.value);
       break;
     case "retention":
       funnel.retentionConversions[retentionIndex] = clampPercent(target.value);
@@ -476,6 +638,34 @@ document.addEventListener("change", (event) => {
   }
 
   render();
+  scheduleSave();
 });
 
-render();
+saveNowButton.addEventListener("click", () => {
+  void persistSharedState("manual");
+});
+
+async function bootstrap() {
+  render();
+  saveNowButton.disabled = true;
+  setSaveUi("Загрузка…", "Подтягиваю сохраненные настройки из общей базы.");
+
+  try {
+    const result = await fetchSharedState();
+    if (result?.payload) {
+      applyState(result.payload);
+      render();
+      setSaveUi("Синхронизировано", formatTimestamp(result.updatedAt));
+    } else {
+      setSaveUi("База пуста", "Пока загружены стартовые значения. Первое изменение создаст общую запись.");
+    }
+  } catch (error) {
+    console.error(error);
+    setSaveUi("Локальный режим", "Сервер сохранения недоступен. Сейчас значения не шарятся между участниками.");
+  } finally {
+    isBootstrapping = false;
+    saveNowButton.disabled = false;
+  }
+}
+
+void bootstrap();

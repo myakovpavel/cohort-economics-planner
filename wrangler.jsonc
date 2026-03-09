@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cohort-economics-planner",
+  "compatibility_date": "2026-03-09",
+  "pages_build_output_dir": ".",
+  "d1_databases": [
+    {
+      "binding": "cohort_economics_planner_db",
+      "database_name": "cohort-economics-planner-db",
+      "database_id": "72843b46-0033-4620-95d5-c5f1089c3e05"
+    }
+  ]
+}
