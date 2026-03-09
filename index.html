@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cohort Economics Planner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Подписочная аналитика 2026</p>
+          <h1>Когортная экономика по двум воронкам</h1>
+          <p class="hero-copy">
+            Планируйте месячные когорты, рекламный бюджет, trial и оплату по
+            месяцам. Сервис считает выручку, удержание и прибыль отдельно по
+            каждой воронке и в сумме.
+          </p>
+        </div>
+        <div class="hero-card">
+          <div class="hero-metric">
+            <span>Горизонт расчета</span>
+            <strong id="hero-horizon">24 месяца</strong>
+          </div>
+          <div class="hero-metric">
+            <span>Календарный период</span>
+            <strong>Январь 2026 - Декабрь 2026</strong>
+          </div>
+        </div>
+      </header>
+
+      <main id="app"></main>
+    </div>
+
+    <template id="funnel-template">
+      <section class="panel funnel-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="panel-kicker"></p>
+            <h2></h2>
+          </div>
+          <p class="panel-note"></p>
+        </div>
+
+        <div class="settings-grid">
+          <label>
+            <span>Название</span>
+            <input data-field="name" type="text" />
+          </label>
+          <label>
+            <span>Цена первого платежа, $</span>
+            <input data-field="firstPrice" type="number" min="0" step="0.01" />
+          </label>
+          <label>
+            <span>Повторный платеж, $</span>
+            <input data-field="recurringPrice" type="number" min="0" step="0.01" />
+          </label>
+          <label>
+            <span>Trial conversion, %</span>
+            <input data-field="trialConversion" type="number" min="0" max="100" step="0.1" />
+          </label>
+          <label>
+            <span>Оплата в 1-й месяц после trial, %</span>
+            <input data-field="month1Conversion" type="number" min="0" max="100" step="0.1" />
+          </label>
+          <label>
+            <span>Горизонт расчета, мес.</span>
+            <input data-field="horizonMonths" type="number" min="12" max="60" step="1" />
+          </label>
+        </div>
+
+        <div class="subpanel">
+          <div class="subpanel-heading">
+            <div>
+              <h3>План по месяцам</h3>
+              <p>
+                Укажите входящий объем и бюджет по месяцам 2026 года. Если
+                прогноз уже считается как количество первых оплат, поставьте
+                `Trial conversion = 100%` и `Оплата в 1-й месяц = 100%`.
+              </p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="input-table">
+              <thead>
+                <tr>
+                  <th>Месяц</th>
+                  <th>Входящий объем</th>
+                  <th>Рекламный бюджет, $</th>
+                </tr>
+              </thead>
+              <tbody data-month-plan></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="subpanel">
+          <div class="subpanel-heading">
+            <div>
+              <h3>Конверсии удержания</h3>
+              <p>
+                Для месяцев 2-10 задается отдельная конверсия оплаты. Начиная с
+                11-го месяца используется статичная конверсия последнего поля.
+              </p>
+            </div>
+          </div>
+          <div class="retention-grid" data-retention-grid></div>
+        </div>
+
+        <div class="subpanel">
+          <div class="subpanel-heading">
+            <div>
+              <h3>Результат по воронке</h3>
+              <p>Календарная выручка 2026, бюджет, прибыль и LTV по когортам.</p>
+            </div>
+          </div>
+          <div class="metric-grid" data-funnel-metrics></div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr>
+                  <th>Когорта</th>
+                  <th>Поток</th>
+                  <th>Trial</th>
+                  <th>Первые оплаты</th>
+                  <th>Lifetime revenue, $</th>
+                  <th>Выручка 2026, $</th>
+                  <th>Бюджет, $</th>
+                  <th>Прибыль, $</th>
+                </tr>
+              </thead>
+              <tbody data-cohort-results></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
