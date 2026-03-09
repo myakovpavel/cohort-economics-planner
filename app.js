@@ -13,35 +13,49 @@ const MONTHS = [
   "Дек",
 ];
 
+const DEFAULT_FUNNELS = [
+  {
+    id: "core",
+    label: "Воронка 19.89",
+    note: "Базовая подписка с первым платежом 19.89 и тем же recurring ARPU.",
+    name: "19.89 offer",
+    firstPrice: 19.89,
+    recurringPrice: 19.89,
+    trialConversion: 42,
+    month1Conversion: 68,
+    horizonMonths: 24,
+    monthlyVolume: [140000, 148000, 156000, 164000, 172000, 180000, 190000, 202000, 216000, 232000, 248000, 264000],
+    monthlyBudget: [250000, 290000, 330000, 380000, 430000, 470000, 520000, 580000, 650000, 720000, 790000, 860000],
+    retentionConversions: [84, 81, 78, 76, 74, 72, 70, 69, 68],
+  },
+  {
+    id: "upsell",
+    label: "Воронка $1 -> $39",
+    note: "Первый платеж 1 доллар, затем 39 долларов в recurring.",
+    name: "$1 -> $39",
+    firstPrice: 1,
+    recurringPrice: 39,
+    trialConversion: 37,
+    month1Conversion: 61,
+    horizonMonths: 24,
+    monthlyVolume: [120000, 128000, 136000, 145000, 154000, 166000, 178000, 191000, 204000, 218000, 232000, 246000],
+    monthlyBudget: [500000, 730000, 960000, 1180000, 1400000, 1620000, 1850000, 2080000, 2310000, 2540000, 2770000, 3000000],
+    retentionConversions: [88, 84, 81, 79, 77, 75, 74, 73, 72],
+  },
+];
+
 const DEFAULT_STATE = {
-  funnels: [
+  selectedProfileId: "pavel",
+  profiles: [
     {
-      id: "core",
-      label: "Воронка 19.89",
-      note: "Базовая подписка с первым платежом 19.89 и тем же recurring ARPU.",
-      name: "19.89 offer",
-      firstPrice: 19.89,
-      recurringPrice: 19.89,
-      trialConversion: 42,
-      month1Conversion: 68,
-      horizonMonths: 24,
-      monthlyVolume: [140000, 148000, 156000, 164000, 172000, 180000, 190000, 202000, 216000, 232000, 248000, 264000],
-      monthlyBudget: [250000, 290000, 330000, 380000, 430000, 470000, 520000, 580000, 650000, 720000, 790000, 860000],
-      retentionConversions: [84, 81, 78, 76, 74, 72, 70, 69, 68],
+      id: "pavel",
+      name: "Павел",
+      funnels: structuredClone(DEFAULT_FUNNELS),
     },
     {
-      id: "upsell",
-      label: "Воронка $1 -> $39",
-      note: "Первый платеж 1 доллар, затем 39 долларов в recurring.",
-      name: "$1 -> $39",
-      firstPrice: 1,
-      recurringPrice: 39,
-      trialConversion: 37,
-      month1Conversion: 61,
-      horizonMonths: 24,
-      monthlyVolume: [120000, 128000, 136000, 145000, 154000, 166000, 178000, 191000, 204000, 218000, 232000, 246000],
-      monthlyBudget: [500000, 730000, 960000, 1180000, 1400000, 1620000, 1850000, 2080000, 2310000, 2540000, 2770000, 3000000],
-      retentionConversions: [88, 84, 81, 79, 77, 75, 74, 73, 72],
+      id: "darya",
+      name: "Дарья",
+      funnels: structuredClone(DEFAULT_FUNNELS),
     },
   ],
 };
@@ -60,6 +74,9 @@ const saveStatus = document.querySelector("#save-status");
 const saveMeta = document.querySelector("#save-meta");
 const saveNowButton = document.querySelector("#save-now");
 const screenTabs = document.querySelector("#screen-tabs");
+const profileSelect = document.querySelector("#profile-select");
+const addProfileButton = document.querySelector("#add-profile");
+const deleteProfileButton = document.querySelector("#delete-profile");
 
 let isBootstrapping = true;
 let pendingSaveTimer = null;
@@ -165,34 +182,123 @@ function sanitizeFunnel(candidate, fallback) {
   };
 }
 
-function sanitizeState(candidate) {
+function sanitizeFunnels(candidateFunnels) {
+  return DEFAULT_FUNNELS.map((fallback, index) =>
+    sanitizeFunnel(candidateFunnels?.[index], fallback),
+  );
+}
+
+function makeProfileId(name) {
+  const base = String(name || "profile")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\wа-яё]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 20) || "profile";
+
+  let nextId = base;
+  let counter = 2;
+  const used = new Set(state.profiles.map((profile) => profile.id));
+  while (used.has(nextId)) {
+    nextId = `${base}-${counter}`;
+    counter += 1;
+  }
+  return nextId;
+}
+
+function sanitizeProfile(candidate, fallbackName = "Новый профиль", fallbackId = null) {
+  const name = typeof candidate?.name === "string" && candidate.name.trim()
+    ? candidate.name.trim()
+    : fallbackName;
+
   return {
-    funnels: DEFAULT_STATE.funnels.map((fallback, index) =>
-      sanitizeFunnel(candidate?.funnels?.[index], fallback),
-    ),
+    id: typeof candidate?.id === "string" && candidate.id.trim()
+      ? candidate.id.trim()
+      : fallbackId ?? makeProfileId(name),
+    name,
+    funnels: sanitizeFunnels(candidate?.funnels),
+  };
+}
+
+function normalizeLegacyPayload(candidate) {
+  if (Array.isArray(candidate?.funnels) && candidate.funnels.length === 2) {
+    return {
+      selectedProfileId: "pavel",
+      profiles: [
+        {
+          id: "pavel",
+          name: "Павел",
+          funnels: sanitizeFunnels(candidate.funnels),
+        },
+        {
+          id: "darya",
+          name: "Дарья",
+          funnels: sanitizeFunnels(DEFAULT_FUNNELS),
+        },
+      ],
+    };
+  }
+
+  return candidate;
+}
+
+function sanitizeState(candidate) {
+  const normalized = normalizeLegacyPayload(candidate);
+  const incomingProfiles = Array.isArray(normalized?.profiles) ? normalized.profiles : [];
+  const profiles = incomingProfiles.length > 0
+    ? incomingProfiles.map((profile, index) =>
+        sanitizeProfile(
+          profile,
+          DEFAULT_STATE.profiles[index]?.name ?? `Профиль ${index + 1}`,
+          profile?.id || null,
+        ),
+      )
+    : structuredClone(DEFAULT_STATE.profiles);
+
+  const selectedProfileId = profiles.some((profile) => profile.id === normalized?.selectedProfileId)
+    ? normalized.selectedProfileId
+    : profiles[0].id;
+
+  return {
+    selectedProfileId,
+    profiles,
   };
 }
 
 function applyState(nextState) {
   const sanitized = sanitizeState(nextState);
-  state.funnels = sanitized.funnels;
+  state.selectedProfileId = sanitized.selectedProfileId;
+  state.profiles = sanitized.profiles;
 }
 
 function serializeState() {
   return {
-    funnels: state.funnels.map((funnel) => ({
-      id: funnel.id,
-      name: funnel.name,
-      firstPrice: funnel.firstPrice,
-      recurringPrice: funnel.recurringPrice,
-      trialConversion: funnel.trialConversion,
-      month1Conversion: funnel.month1Conversion,
-      horizonMonths: funnel.horizonMonths,
-      monthlyVolume: [...funnel.monthlyVolume],
-      monthlyBudget: [...funnel.monthlyBudget],
-      retentionConversions: [...funnel.retentionConversions],
+    selectedProfileId: state.selectedProfileId,
+    profiles: state.profiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      funnels: profile.funnels.map((funnel) => ({
+        id: funnel.id,
+        name: funnel.name,
+        firstPrice: funnel.firstPrice,
+        recurringPrice: funnel.recurringPrice,
+        trialConversion: funnel.trialConversion,
+        month1Conversion: funnel.month1Conversion,
+        horizonMonths: funnel.horizonMonths,
+        monthlyVolume: [...funnel.monthlyVolume],
+        monthlyBudget: [...funnel.monthlyBudget],
+        retentionConversions: [...funnel.retentionConversions],
+      })),
     })),
   };
+}
+
+function getCurrentProfile() {
+  return state.profiles.find((profile) => profile.id === state.selectedProfileId) ?? state.profiles[0];
+}
+
+function getCurrentFunnels() {
+  return getCurrentProfile().funnels;
 }
 
 function getRetentionForAge(funnel, ageIndex) {
@@ -284,6 +390,7 @@ function buildLineChart(values, color, fillColor) {
   const innerHeight = height - padding.top - padding.bottom;
   const maxValue = Math.max(...values, 1);
   const ticks = 4;
+  const gradientId = `area-${Math.random().toString(36).slice(2, 10)}`;
 
   const x = (index) =>
     padding.left + (innerWidth / Math.max(values.length - 1, 1)) * index;
@@ -300,16 +407,13 @@ function buildLineChart(values, color, fillColor) {
     const ratio = index / ticks;
     const value = maxValue * (1 - ratio);
     const position = padding.top + innerHeight * ratio;
-    return {
-      value,
-      position,
-    };
+    return { value, position };
   });
 
   return `
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Line chart">
       <defs>
-        <linearGradient id="area-${color.replace(/[^a-z0-9]/gi, "")}" x1="0" x2="0" y1="0" y2="1">
+        <linearGradient id="${gradientId}" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stop-color="${fillColor}" />
           <stop offset="100%" stop-color="rgba(255,255,255,0)" />
         </linearGradient>
@@ -327,7 +431,7 @@ function buildLineChart(values, color, fillColor) {
           <text x="${x(index)}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${month}</text>
         `,
       ).join("")}
-      <path d="${areaPath}" fill="url(#area-${color.replace(/[^a-z0-9]/gi, "")})"></path>
+      <path d="${areaPath}" fill="url(#${gradientId})"></path>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
       ${values
         .map(
@@ -409,7 +513,7 @@ function renderCohortRows(tbody, calculation) {
     .join("");
 }
 
-function renderMonthPlanRows(funnelIndex, tbody) {
+function renderMonthPlanRows(funnels, funnelIndex, tbody) {
   tbody.innerHTML = MONTHS.map(
     (month, monthIndex) => `
       <tr>
@@ -422,7 +526,7 @@ function renderMonthPlanRows(funnelIndex, tbody) {
             type="number"
             min="0"
             step="1"
-            value="${state.funnels[funnelIndex].monthlyVolume[monthIndex]}"
+            value="${funnels[funnelIndex].monthlyVolume[monthIndex]}"
           />
         </td>
         <td>
@@ -433,7 +537,7 @@ function renderMonthPlanRows(funnelIndex, tbody) {
             type="number"
             min="0"
             step="1000"
-            value="${state.funnels[funnelIndex].monthlyBudget[monthIndex]}"
+            value="${funnels[funnelIndex].monthlyBudget[monthIndex]}"
           />
         </td>
       </tr>
@@ -441,7 +545,7 @@ function renderMonthPlanRows(funnelIndex, tbody) {
   ).join("");
 }
 
-function renderRetentionFields(funnelIndex, container) {
+function renderRetentionFields(funnels, funnelIndex, container) {
   container.innerHTML = Array.from({ length: 9 }, (_, offset) => {
     const monthNumber = offset + 2;
     return `
@@ -455,14 +559,29 @@ function renderRetentionFields(funnelIndex, container) {
           min="0"
           max="100"
           step="0.1"
-          value="${state.funnels[funnelIndex].retentionConversions[offset]}"
+          value="${funnels[funnelIndex].retentionConversions[offset]}"
         />
       </label>
     `;
   }).join("");
 }
 
+function renderProfileControls() {
+  profileSelect.innerHTML = state.profiles
+    .map(
+      (profile) => `
+        <option value="${profile.id}" ${profile.id === state.selectedProfileId ? "selected" : ""}>
+          ${profile.name}
+        </option>
+      `,
+    )
+    .join("");
+
+  deleteProfileButton.disabled = state.profiles.length <= 1;
+}
+
 function renderDashboard(calculations) {
+  const profile = getCurrentProfile();
   const totalRevenue = calculations.reduce((sum, item) => sum + item.totalRevenue2026, 0);
   const totalBudget = calculations.reduce((sum, item) => sum + item.totalBudget, 0);
   const totalProfit = totalRevenue - totalBudget;
@@ -487,7 +606,7 @@ function renderDashboard(calculations) {
             <div>
               <p class="panel-kicker">Main chart</p>
               <h2>Оборот по месяцам</h2>
-              <p>Календарная выручка двух воронок в рамках 2026 года.</p>
+              <p>Профиль ${profile.name}. Календарная выручка двух воронок в рамках 2026 года.</p>
             </div>
             <div class="chart-total">
               <span>Итого за 2026</span>
@@ -505,7 +624,7 @@ function renderDashboard(calculations) {
             <div>
               <p class="panel-kicker">Profit chart</p>
               <h2>Прибыль по месяцам</h2>
-              <p>Оборот минус рекламный кост по календарным месяцам.</p>
+              <p>Оборот минус рекламный кост по календарным месяцам для текущего профиля.</p>
             </div>
             <div class="chart-total">
               <span>Итого за 2026</span>
@@ -595,17 +714,19 @@ function renderDashboard(calculations) {
       tone: totalProfit >= 0 ? "positive" : "negative",
     },
     {
-      label: "Горизонт",
-      value: `${horizon} мес`,
+      label: "Профиль",
+      value: profile.name,
     },
   ]);
 }
 
 function renderSettings(calculations) {
+  const funnels = getCurrentFunnels();
+
   settingsScreen.innerHTML = `
     <div class="settings-shell">
       <div class="funnel-tabs">
-        ${state.funnels
+        ${funnels
           .map(
             (funnel) => `
               <button
@@ -626,7 +747,7 @@ function renderSettings(calculations) {
   const screens = settingsScreen.querySelector("#funnel-screens");
   const template = document.querySelector("#funnel-template");
 
-  state.funnels.forEach((funnel, index) => {
+  funnels.forEach((funnel, index) => {
     const node = template.content.firstElementChild.cloneNode(true);
     const calculation = calculations[index];
 
@@ -645,8 +766,8 @@ function renderSettings(calculations) {
       input.dataset.funnelIndex = index;
     });
 
-    renderMonthPlanRows(index, node.querySelector("[data-month-plan]"));
-    renderRetentionFields(index, node.querySelector("[data-retention-grid]"));
+    renderMonthPlanRows(funnels, index, node.querySelector("[data-month-plan]"));
+    renderRetentionFields(funnels, index, node.querySelector("[data-retention-grid]"));
 
     renderMetricCards(node.querySelector("[data-funnel-metrics]"), [
       { label: "Выручка 2026", value: formatMoney(calculation.totalRevenue2026) },
@@ -677,14 +798,16 @@ function syncScreenState() {
 }
 
 function render() {
-  const calculations = state.funnels.map((funnel) => calculateFunnel(funnel));
+  const funnels = getCurrentFunnels();
+  const calculations = funnels.map((funnel) => calculateFunnel(funnel));
+  renderProfileControls();
   renderDashboard(calculations);
   renderSettings(calculations);
   syncScreenState();
 }
 
 function updateField(funnelIndex, field, value) {
-  const funnel = state.funnels[funnelIndex];
+  const funnel = getCurrentFunnels()[funnelIndex];
   if (!funnel) {
     return;
   }
@@ -705,6 +828,42 @@ function updateField(funnelIndex, field, value) {
   if (numericFields.includes(field)) {
     funnel[field] = Number(value) || 0;
   }
+}
+
+function addProfile() {
+  const name = window.prompt("Имя нового профиля", `Профиль ${state.profiles.length + 1}`);
+  if (!name || !name.trim()) {
+    return;
+  }
+
+  const currentProfile = getCurrentProfile();
+  const profile = {
+    id: makeProfileId(name.trim()),
+    name: name.trim(),
+    funnels: structuredClone(currentProfile.funnels),
+  };
+
+  state.profiles.push(profile);
+  state.selectedProfileId = profile.id;
+  render();
+  scheduleSave();
+}
+
+function deleteCurrentProfile() {
+  if (state.profiles.length <= 1) {
+    return;
+  }
+
+  const profile = getCurrentProfile();
+  const confirmed = window.confirm(`Удалить профиль "${profile.name}"?`);
+  if (!confirmed) {
+    return;
+  }
+
+  state.profiles = state.profiles.filter((item) => item.id !== profile.id);
+  state.selectedProfileId = state.profiles[0].id;
+  render();
+  scheduleSave();
 }
 
 async function fetchSharedState() {
@@ -799,7 +958,7 @@ document.addEventListener("change", (event) => {
   const funnelIndex = Number(target.dataset.funnelIndex);
   const monthIndex = Number(target.dataset.monthIndex);
   const retentionIndex = Number(target.dataset.retentionIndex);
-  const funnel = state.funnels[funnelIndex];
+  const funnel = getCurrentFunnels()[funnelIndex];
 
   if (!funnel) {
     return;
@@ -841,6 +1000,20 @@ document.addEventListener("click", (event) => {
     uiState.selectedFunnelId = funnelButton.dataset.funnelTab;
     render();
   }
+});
+
+profileSelect.addEventListener("change", () => {
+  state.selectedProfileId = profileSelect.value;
+  render();
+  scheduleSave();
+});
+
+addProfileButton.addEventListener("click", () => {
+  addProfile();
+});
+
+deleteProfileButton.addEventListener("click", () => {
+  deleteCurrentProfile();
 });
 
 saveNowButton.addEventListener("click", () => {

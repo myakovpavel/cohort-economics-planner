@@ -10,7 +10,22 @@ function json(data, init = {}) {
 }
 
 function hasValidPayload(payload) {
-  return payload && Array.isArray(payload.funnels) && payload.funnels.length === 2;
+  if (payload && Array.isArray(payload.funnels) && payload.funnels.length === 2) {
+    return true;
+  }
+
+  return (
+    payload &&
+    Array.isArray(payload.profiles) &&
+    payload.profiles.length >= 1 &&
+    payload.profiles.every(
+      (profile) =>
+        profile &&
+        typeof profile.name === "string" &&
+        Array.isArray(profile.funnels) &&
+        profile.funnels.length === 2,
+    )
+  );
 }
 
 export async function onRequestGet(context) {
