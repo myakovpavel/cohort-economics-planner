@@ -1,62 +1,49 @@
-const MONTHS = [
-  "Янв",
-  "Фев",
-  "Мар",
-  "Апр",
-  "Май",
-  "Июн",
-  "Июл",
-  "Авг",
-  "Сен",
-  "Окт",
-  "Ноя",
-  "Дек",
-];
+const MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
 
 const DEFAULT_FUNNELS = [
   {
     id: "core",
     label: "Воронка 19.89",
-    note: "Базовая подписка с первым платежом 19.89 и тем же recurring ARPU.",
-    name: "19.89 offer",
-    firstPrice: 19.89,
-    recurringPrice: 19.89,
-    trialConversion: 42,
-    month1Conversion: 68,
+    note: "Модель 19.89 с upsell ARPU и отдельной retention-кривой.",
+    name: "$19.89 funnel",
+    budgetStart: 250000,
+    budgetEnd: 860000,
+    cac: 27,
+    avgCheck: 22,
+    subscriptionPrice: 19.89,
+    trialConversion: 69,
+    month1Conversion: 50,
+    stripeFee: 5.5,
+    refundRate: 23,
+    authorRate: 2,
     horizonMonths: 24,
-    monthlyVolume: [140000, 148000, 156000, 164000, 172000, 180000, 190000, 202000, 216000, 232000, 248000, 264000],
-    monthlyBudget: [250000, 290000, 330000, 380000, 430000, 470000, 520000, 580000, 650000, 720000, 790000, 860000],
-    retentionConversions: [84, 81, 78, 76, 74, 72, 70, 69, 68],
+    retentionConversions: [56, 65, 79, 80, 85, 85, 85, 85, 85],
   },
   {
     id: "upsell",
     label: "Воронка $1 -> $39",
-    note: "Первый платеж 1 доллар, затем 39 долларов в recurring.",
-    name: "$1 -> $39",
-    firstPrice: 1,
-    recurringPrice: 39,
-    trialConversion: 37,
-    month1Conversion: 61,
+    note: "Вход в продукт через $1 с последующей подпиской $39.",
+    name: "$1 -> $39 funnel",
+    budgetStart: 500000,
+    budgetEnd: 3000000,
+    cac: 14,
+    avgCheck: 1,
+    subscriptionPrice: 39,
+    trialConversion: 100,
+    month1Conversion: 40,
+    stripeFee: 5.5,
+    refundRate: 15,
+    authorRate: 1,
     horizonMonths: 24,
-    monthlyVolume: [120000, 128000, 136000, 145000, 154000, 166000, 178000, 191000, 204000, 218000, 232000, 246000],
-    monthlyBudget: [500000, 730000, 960000, 1180000, 1400000, 1620000, 1850000, 2080000, 2310000, 2540000, 2770000, 3000000],
-    retentionConversions: [88, 84, 81, 79, 77, 75, 74, 73, 72],
+    retentionConversions: [63, 70, 80, 80, 85, 85, 90, 90, 90],
   },
 ];
 
 const DEFAULT_STATE = {
   selectedProfileId: "pavel",
   profiles: [
-    {
-      id: "pavel",
-      name: "Павел",
-      funnels: structuredClone(DEFAULT_FUNNELS),
-    },
-    {
-      id: "darya",
-      name: "Дарья",
-      funnels: structuredClone(DEFAULT_FUNNELS),
-    },
+    { id: "pavel", name: "Павел", funnels: structuredClone(DEFAULT_FUNNELS) },
+    { id: "darya", name: "Дарья", funnels: structuredClone(DEFAULT_FUNNELS) },
   ],
 };
 
@@ -101,13 +88,11 @@ function formatMoneyPrecise(value) {
 }
 
 function formatNumber(value) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(value);
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
 function formatPercent(value) {
-  return `${value.toFixed(1)}%`;
+  return `${Number(value).toFixed(1)}%`;
 }
 
 function formatTimestamp(value) {
@@ -143,11 +128,15 @@ function average(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function normalizeArray(values, fallbackValues) {
-  return fallbackValues.map((fallback, index) => {
-    const candidate = Array.isArray(values) ? values[index] : fallback;
-    return clampPositive(candidate ?? fallback);
-  });
+function interpolateBudget(start, end, index) {
+  if (index === 0) return start;
+  if (index === 11) return end;
+  const step = (end - start) / 11;
+  return start + step * index;
+}
+
+function buildMonthlyBudgets(funnel) {
+  return MONTHS.map((_, index) => interpolateBudget(clampPositive(funnel.budgetStart), clampPositive(funnel.budgetEnd), index));
 }
 
 function normalizeRetention(values, fallbackValues) {
@@ -162,30 +151,24 @@ function sanitizeFunnel(candidate, fallback) {
     id: fallback.id,
     label: fallback.label,
     note: fallback.note,
-    name: typeof candidate?.name === "string" && candidate.name.trim()
-      ? candidate.name.trim()
-      : fallback.name,
-    firstPrice: clampPositive(candidate?.firstPrice ?? fallback.firstPrice),
-    recurringPrice: clampPositive(candidate?.recurringPrice ?? fallback.recurringPrice),
+    name: typeof candidate?.name === "string" && candidate.name.trim() ? candidate.name.trim() : fallback.name,
+    budgetStart: clampPositive(candidate?.budgetStart ?? fallback.budgetStart),
+    budgetEnd: clampPositive(candidate?.budgetEnd ?? fallback.budgetEnd),
+    cac: clampPositive(candidate?.cac ?? fallback.cac),
+    avgCheck: clampPositive(candidate?.avgCheck ?? fallback.avgCheck),
+    subscriptionPrice: clampPositive(candidate?.subscriptionPrice ?? fallback.subscriptionPrice),
     trialConversion: clampPercent(candidate?.trialConversion ?? fallback.trialConversion),
     month1Conversion: clampPercent(candidate?.month1Conversion ?? fallback.month1Conversion),
-    horizonMonths: Math.max(
-      12,
-      Math.min(60, Math.round(Number(candidate?.horizonMonths ?? fallback.horizonMonths) || fallback.horizonMonths)),
-    ),
-    monthlyVolume: normalizeArray(candidate?.monthlyVolume, fallback.monthlyVolume),
-    monthlyBudget: normalizeArray(candidate?.monthlyBudget, fallback.monthlyBudget),
-    retentionConversions: normalizeRetention(
-      candidate?.retentionConversions,
-      fallback.retentionConversions,
-    ),
+    stripeFee: clampPercent(candidate?.stripeFee ?? fallback.stripeFee),
+    refundRate: clampPercent(candidate?.refundRate ?? fallback.refundRate),
+    authorRate: clampPercent(candidate?.authorRate ?? fallback.authorRate),
+    horizonMonths: Math.max(12, Math.min(60, Math.round(Number(candidate?.horizonMonths ?? fallback.horizonMonths) || fallback.horizonMonths))),
+    retentionConversions: normalizeRetention(candidate?.retentionConversions, fallback.retentionConversions),
   };
 }
 
 function sanitizeFunnels(candidateFunnels) {
-  return DEFAULT_FUNNELS.map((fallback, index) =>
-    sanitizeFunnel(candidateFunnels?.[index], fallback),
-  );
+  return DEFAULT_FUNNELS.map((fallback, index) => sanitizeFunnel(candidateFunnels?.[index], fallback));
 }
 
 function makeProfileId(name) {
@@ -196,9 +179,9 @@ function makeProfileId(name) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 20) || "profile";
 
+  const used = new Set(state.profiles.map((profile) => profile.id));
   let nextId = base;
   let counter = 2;
-  const used = new Set(state.profiles.map((profile) => profile.id));
   while (used.has(nextId)) {
     nextId = `${base}-${counter}`;
     counter += 1;
@@ -206,15 +189,10 @@ function makeProfileId(name) {
   return nextId;
 }
 
-function sanitizeProfile(candidate, fallbackName = "Новый профиль", fallbackId = null) {
-  const name = typeof candidate?.name === "string" && candidate.name.trim()
-    ? candidate.name.trim()
-    : fallbackName;
-
+function sanitizeProfile(candidate, fallbackName = "Новый профиль") {
+  const name = typeof candidate?.name === "string" && candidate.name.trim() ? candidate.name.trim() : fallbackName;
   return {
-    id: typeof candidate?.id === "string" && candidate.id.trim()
-      ? candidate.id.trim()
-      : fallbackId ?? makeProfileId(name),
+    id: typeof candidate?.id === "string" && candidate.id.trim() ? candidate.id.trim() : makeProfileId(name),
     name,
     funnels: sanitizeFunnels(candidate?.funnels),
   };
@@ -225,16 +203,8 @@ function normalizeLegacyPayload(candidate) {
     return {
       selectedProfileId: "pavel",
       profiles: [
-        {
-          id: "pavel",
-          name: "Павел",
-          funnels: sanitizeFunnels(candidate.funnels),
-        },
-        {
-          id: "darya",
-          name: "Дарья",
-          funnels: sanitizeFunnels(DEFAULT_FUNNELS),
-        },
+        { id: "pavel", name: "Павел", funnels: sanitizeFunnels(candidate.funnels) },
+        { id: "darya", name: "Дарья", funnels: structuredClone(DEFAULT_FUNNELS) },
       ],
     };
   }
@@ -244,25 +214,15 @@ function normalizeLegacyPayload(candidate) {
 
 function sanitizeState(candidate) {
   const normalized = normalizeLegacyPayload(candidate);
-  const incomingProfiles = Array.isArray(normalized?.profiles) ? normalized.profiles : [];
-  const profiles = incomingProfiles.length > 0
-    ? incomingProfiles.map((profile, index) =>
-        sanitizeProfile(
-          profile,
-          DEFAULT_STATE.profiles[index]?.name ?? `Профиль ${index + 1}`,
-          profile?.id || null,
-        ),
-      )
+  const incomingProfiles = Array.isArray(normalized?.profiles) && normalized.profiles.length > 0
+    ? normalized.profiles.map((profile, index) => sanitizeProfile(profile, DEFAULT_STATE.profiles[index]?.name ?? `Профиль ${index + 1}`))
     : structuredClone(DEFAULT_STATE.profiles);
 
-  const selectedProfileId = profiles.some((profile) => profile.id === normalized?.selectedProfileId)
+  const selectedProfileId = incomingProfiles.some((profile) => profile.id === normalized?.selectedProfileId)
     ? normalized.selectedProfileId
-    : profiles[0].id;
+    : incomingProfiles[0].id;
 
-  return {
-    selectedProfileId,
-    profiles,
-  };
+  return { selectedProfileId, profiles: incomingProfiles };
 }
 
 function applyState(nextState) {
@@ -280,13 +240,17 @@ function serializeState() {
       funnels: profile.funnels.map((funnel) => ({
         id: funnel.id,
         name: funnel.name,
-        firstPrice: funnel.firstPrice,
-        recurringPrice: funnel.recurringPrice,
+        budgetStart: funnel.budgetStart,
+        budgetEnd: funnel.budgetEnd,
+        cac: funnel.cac,
+        avgCheck: funnel.avgCheck,
+        subscriptionPrice: funnel.subscriptionPrice,
         trialConversion: funnel.trialConversion,
         month1Conversion: funnel.month1Conversion,
+        stripeFee: funnel.stripeFee,
+        refundRate: funnel.refundRate,
+        authorRate: funnel.authorRate,
         horizonMonths: funnel.horizonMonths,
-        monthlyVolume: [...funnel.monthlyVolume],
-        monthlyBudget: [...funnel.monthlyBudget],
         retentionConversions: [...funnel.retentionConversions],
       })),
     })),
@@ -301,37 +265,58 @@ function getCurrentFunnels() {
   return getCurrentProfile().funnels;
 }
 
-function getRetentionForAge(funnel, ageIndex) {
-  if (ageIndex <= 1) {
-    return 1;
-  }
-
+function retentionForAge(funnel, ageIndex) {
   const monthOffset = ageIndex - 2;
-  return funnel.retentionConversions[
-    Math.min(monthOffset, funnel.retentionConversions.length - 1)
-  ] / 100;
+  return clampPercent(funnel.retentionConversions[Math.min(monthOffset, funnel.retentionConversions.length - 1)]) / 100;
+}
+
+function firstNetPerPayment(funnel) {
+  return funnel.avgCheck * Math.max(0, 1 - funnel.stripeFee / 100 - funnel.refundRate / 100 - funnel.authorRate / 100);
+}
+
+function recurringNetPerPayment(funnel) {
+  return funnel.subscriptionPrice * Math.max(0, 1 - funnel.stripeFee / 100);
 }
 
 function calculateFunnel(funnel) {
   const calendarRevenue = Array(12).fill(0);
+  const monthlyBudgets = buildMonthlyBudgets(funnel);
   const cohortRows = [];
   const horizon = Math.max(12, Math.min(60, Math.round(funnel.horizonMonths)));
+  const firstNet = firstNetPerPayment(funnel);
+  const recurringNet = recurringNetPerPayment(funnel);
 
   for (let cohortIndex = 0; cohortIndex < 12; cohortIndex += 1) {
-    const incoming = clampPositive(funnel.monthlyVolume[cohortIndex]);
-    const budget = clampPositive(funnel.monthlyBudget[cohortIndex]);
-    const trialCount = incoming * (clampPercent(funnel.trialConversion) / 100);
+    const budget = monthlyBudgets[cohortIndex];
+    const acquisitions = funnel.cac > 0 ? budget / funnel.cac : 0;
+    const trialCount = acquisitions * (clampPercent(funnel.trialConversion) / 100);
     const firstPayments = trialCount * (clampPercent(funnel.month1Conversion) / 100);
     let activePaid = firstPayments;
-    let lifetimeRevenue = activePaid * funnel.firstPrice;
-    let revenue2026 = activePaid * funnel.firstPrice;
 
-    calendarRevenue[cohortIndex] += activePaid * funnel.firstPrice;
+    const income0 = firstPayments * firstNet;
+    let income01 = income0;
+    let income012 = income0;
+    let incomeYear = income0;
+    let lifetimeRevenue = income0;
+    let revenue2026 = income0;
+    calendarRevenue[cohortIndex] += income0;
 
     for (let age = 2; age <= horizon; age += 1) {
-      activePaid *= getRetentionForAge(funnel, age);
-      const revenue = activePaid * funnel.recurringPrice;
+      activePaid *= retentionForAge(funnel, age);
+      const revenue = activePaid * recurringNet;
       lifetimeRevenue += revenue;
+
+      if (age === 2) {
+        income01 += revenue;
+        income012 += revenue;
+      } else if (age === 3) {
+        income012 += revenue;
+      }
+
+      if (age <= 12) {
+        incomeYear += revenue;
+      }
+
       const calendarMonth = cohortIndex + age - 1;
       if (calendarMonth < 12) {
         calendarRevenue[calendarMonth] += revenue;
@@ -341,24 +326,29 @@ function calculateFunnel(funnel) {
 
     cohortRows.push({
       cohortLabel: MONTHS[cohortIndex],
-      incoming,
+      budget,
+      acquisitions,
       trialCount,
       firstPayments,
+      income0,
+      income01,
+      income012,
+      incomeYear,
       lifetimeRevenue,
       revenue2026,
-      budget,
       profit: revenue2026 - budget,
     });
   }
 
   const totalRevenue2026 = calendarRevenue.reduce((sum, value) => sum + value, 0);
-  const totalBudget = funnel.monthlyBudget.reduce((sum, value) => sum + clampPositive(value), 0);
+  const totalBudget = monthlyBudgets.reduce((sum, value) => sum + value, 0);
   const totalLifetimeRevenue = cohortRows.reduce((sum, row) => sum + row.lifetimeRevenue, 0);
   const totalFirstPayments = cohortRows.reduce((sum, row) => sum + row.firstPayments, 0);
-  const monthlyProfit = calendarRevenue.map((revenue, index) => revenue - clampPositive(funnel.monthlyBudget[index]));
+  const monthlyProfit = calendarRevenue.map((revenue, index) => revenue - monthlyBudgets[index]);
 
   return {
     horizon,
+    monthlyBudgets,
     cohortRows,
     calendarRevenue,
     monthlyProfit,
@@ -368,8 +358,7 @@ function calculateFunnel(funnel) {
     totalProfit2026: totalRevenue2026 - totalBudget,
     totalFirstPayments,
     avgCAC: totalFirstPayments > 0 ? totalBudget / totalFirstPayments : 0,
-    avgRevenuePerPayment:
-      totalFirstPayments > 0 ? totalLifetimeRevenue / totalFirstPayments : 0,
+    incomeYearTotal: cohortRows.reduce((sum, row) => sum + row.incomeYear, 0),
   };
 }
 
@@ -392,22 +381,17 @@ function buildLineChart(values, color, fillColor) {
   const ticks = 4;
   const gradientId = `area-${Math.random().toString(36).slice(2, 10)}`;
 
-  const x = (index) =>
-    padding.left + (innerWidth / Math.max(values.length - 1, 1)) * index;
-  const y = (value) =>
-    padding.top + innerHeight - (value / maxValue) * innerHeight;
+  const x = (index) => padding.left + (innerWidth / Math.max(values.length - 1, 1)) * index;
+  const y = (value) => padding.top + innerHeight - (value / maxValue) * innerHeight;
 
-  const linePath = values
-    .map((value, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(value)}`)
-    .join(" ");
-
+  const linePath = values.map((value, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(value)}`).join(" ");
   const areaPath = `${linePath} L ${x(values.length - 1)} ${padding.top + innerHeight} L ${x(0)} ${padding.top + innerHeight} Z`;
-
   const grid = Array.from({ length: ticks + 1 }, (_, index) => {
     const ratio = index / ticks;
-    const value = maxValue * (1 - ratio);
-    const position = padding.top + innerHeight * ratio;
-    return { value, position };
+    return {
+      value: maxValue * (1 - ratio),
+      position: padding.top + innerHeight * ratio,
+    };
   });
 
   return `
@@ -418,28 +402,14 @@ function buildLineChart(values, color, fillColor) {
           <stop offset="100%" stop-color="rgba(255,255,255,0)" />
         </linearGradient>
       </defs>
-      ${grid
-        .map(
-          (tick) => `
-            <line x1="${padding.left}" x2="${width - padding.right}" y1="${tick.position}" y2="${tick.position}" stroke="rgba(12,13,24,0.08)" stroke-width="1" />
-            <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatMoney(tick.value)}</text>
-          `,
-        )
-        .join("")}
-      ${MONTHS.map(
-        (month, index) => `
-          <text x="${x(index)}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${month}</text>
-        `,
-      ).join("")}
+      ${grid.map((tick) => `
+        <line x1="${padding.left}" x2="${width - padding.right}" y1="${tick.position}" y2="${tick.position}" stroke="rgba(12,13,24,0.08)" stroke-width="1" />
+        <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatMoney(tick.value)}</text>
+      `).join("")}
+      ${MONTHS.map((month, index) => `<text x="${x(index)}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${month}</text>`).join("")}
       <path d="${areaPath}" fill="url(#${gradientId})"></path>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
-      ${values
-        .map(
-          (value, index) => `
-            <circle cx="${x(index)}" cy="${y(value)}" r="4.5" fill="${color}" />
-          `,
-        )
-        .join("")}
+      ${values.map((value, index) => `<circle cx="${x(index)}" cy="${y(value)}" r="4.5" fill="${color}" />`).join("")}
     </svg>
   `;
 }
@@ -462,95 +432,78 @@ function buildBarChart(values) {
 
   const grid = Array.from({ length: gridTicks + 1 }, (_, index) => {
     const ratio = index / gridTicks;
-    const value = maxValue - range * ratio;
-    const position = padding.top + innerHeight * ratio;
-    return { value, position };
+    return {
+      value: maxValue - range * ratio,
+      position: padding.top + innerHeight * ratio,
+    };
   });
 
   return `
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Bar chart">
-      ${grid
-        .map(
-          (tick) => `
-            <line x1="${padding.left}" x2="${width - padding.right}" y1="${tick.position}" y2="${tick.position}" stroke="rgba(12,13,24,0.08)" stroke-width="1" />
-            <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatMoney(tick.value)}</text>
-          `,
-        )
-        .join("")}
+      ${grid.map((tick) => `
+        <line x1="${padding.left}" x2="${width - padding.right}" y1="${tick.position}" y2="${tick.position}" stroke="rgba(12,13,24,0.08)" stroke-width="1" />
+        <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatMoney(tick.value)}</text>
+      `).join("")}
       <line x1="${padding.left}" x2="${width - padding.right}" y1="${zeroY}" y2="${zeroY}" stroke="rgba(12,13,24,0.18)" stroke-width="1.2" />
-      ${values
-        .map((value, index) => {
-          const currentY = y(Math.max(value, 0));
-          const heightValue = Math.abs(y(value) - zeroY);
-          const barY = value >= 0 ? currentY : zeroY;
-          const fill = value >= 0 ? "rgba(111, 76, 255, 0.92)" : "rgba(239, 68, 68, 0.92)";
-          return `
-            <rect x="${x(index)}" y="${barY}" width="${Math.max(barWidth, 8)}" height="${Math.max(heightValue, 2)}" rx="10" fill="${fill}" />
-            <text x="${x(index) + Math.max(barWidth, 8) / 2}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${MONTHS[index]}</text>
-          `;
-        })
-        .join("")}
+      ${values.map((value, index) => {
+        const currentY = y(Math.max(value, 0));
+        const heightValue = Math.abs(y(value) - zeroY);
+        const barY = value >= 0 ? currentY : zeroY;
+        const fill = value >= 0 ? "rgba(111, 76, 255, 0.92)" : "rgba(239, 68, 68, 0.92)";
+        return `
+          <rect x="${x(index)}" y="${barY}" width="${Math.max(barWidth, 8)}" height="${Math.max(heightValue, 2)}" rx="10" fill="${fill}" />
+          <text x="${x(index) + Math.max(barWidth, 8) / 2}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${MONTHS[index]}</text>
+        `;
+      }).join("")}
     </svg>
   `;
 }
 
 function renderCohortRows(tbody, calculation) {
   tbody.innerHTML = calculation.cohortRows
-    .map(
-      (row) => `
+    .map((row) => `
       <tr>
         <td>${row.cohortLabel}</td>
-        <td>${formatNumber(row.incoming)}</td>
-        <td>${formatNumber(row.trialCount)}</td>
+        <td>${formatMoney(row.budget)}</td>
+        <td>${formatNumber(row.acquisitions)}</td>
         <td>${formatNumber(row.firstPayments)}</td>
+        <td>${formatMoney(row.income0)}</td>
+        <td>${formatMoney(row.income01)}</td>
+        <td>${formatMoney(row.income012)}</td>
+        <td>${formatMoney(row.incomeYear)}</td>
         <td>${formatMoney(row.lifetimeRevenue)}</td>
         <td>${formatMoney(row.revenue2026)}</td>
-        <td>${formatMoney(row.budget)}</td>
         <td class="${row.profit >= 0 ? "value-positive" : "value-negative"}">${formatMoney(row.profit)}</td>
       </tr>
-    `,
-    )
+    `)
     .join("");
 }
 
-function renderMonthPlanRows(funnels, funnelIndex, tbody) {
-  tbody.innerHTML = MONTHS.map(
-    (month, monthIndex) => `
+function renderMonthPlanRows(calculation, funnel, tbody) {
+  tbody.innerHTML = MONTHS.map((month, monthIndex) => {
+    const budget = calculation.monthlyBudgets[monthIndex];
+    const acquisitions = funnel.cac > 0 ? budget / funnel.cac : 0;
+    const trial = acquisitions * (clampPercent(funnel.trialConversion) / 100);
+    const firstPayments = trial * (clampPercent(funnel.month1Conversion) / 100);
+
+    return `
       <tr>
         <td>${month}</td>
-        <td>
-          <input
-            data-action="volume"
-            data-funnel-index="${funnelIndex}"
-            data-month-index="${monthIndex}"
-            type="number"
-            min="0"
-            step="1"
-            value="${funnels[funnelIndex].monthlyVolume[monthIndex]}"
-          />
-        </td>
-        <td>
-          <input
-            data-action="budget"
-            data-funnel-index="${funnelIndex}"
-            data-month-index="${monthIndex}"
-            type="number"
-            min="0"
-            step="1000"
-            value="${funnels[funnelIndex].monthlyBudget[monthIndex]}"
-          />
-        </td>
+        <td>${formatMoney(budget)}</td>
+        <td>${formatNumber(acquisitions)}</td>
+        <td>${formatNumber(trial)}</td>
+        <td>${formatNumber(firstPayments)}</td>
       </tr>
-    `,
-  ).join("");
+    `;
+  }).join("");
 }
 
-function renderRetentionFields(funnels, funnelIndex, container) {
+function renderRetentionFields(funnelIndex, funnels, container) {
   container.innerHTML = Array.from({ length: 9 }, (_, offset) => {
     const monthNumber = offset + 2;
     return `
       <label>
-        <span>Оплата в ${monthNumber}-й месяц, %</span>
+        <span>Конверсия в ${monthNumber}-й платеж, %</span>
         <input
           data-action="retention"
           data-funnel-index="${funnelIndex}"
@@ -566,34 +519,15 @@ function renderRetentionFields(funnels, funnelIndex, container) {
   }).join("");
 }
 
-function renderProfileControls() {
-  profileSelect.innerHTML = state.profiles
-    .map(
-      (profile) => `
-        <option value="${profile.id}" ${profile.id === state.selectedProfileId ? "selected" : ""}>
-          ${profile.name}
-        </option>
-      `,
-    )
-    .join("");
-
-  deleteProfileButton.disabled = state.profiles.length <= 1;
-}
-
 function renderDashboard(calculations) {
   const profile = getCurrentProfile();
   const totalRevenue = calculations.reduce((sum, item) => sum + item.totalRevenue2026, 0);
   const totalBudget = calculations.reduce((sum, item) => sum + item.totalBudget, 0);
   const totalProfit = totalRevenue - totalBudget;
-  const totalLifetimeRevenue = calculations.reduce((sum, item) => sum + item.totalLifetimeRevenue, 0);
   const horizon = Math.max(...calculations.map((item) => item.horizon));
 
-  const combinedRevenue = Array.from({ length: 12 }, (_, index) =>
-    calculations.reduce((sum, item) => sum + item.calendarRevenue[index], 0),
-  );
-  const combinedProfit = Array.from({ length: 12 }, (_, index) =>
-    calculations.reduce((sum, item) => sum + item.monthlyProfit[index], 0),
-  );
+  const combinedRevenue = Array.from({ length: 12 }, (_, index) => calculations.reduce((sum, item) => sum + item.calendarRevenue[index], 0));
+  const combinedProfit = Array.from({ length: 12 }, (_, index) => calculations.reduce((sum, item) => sum + item.monthlyProfit[index], 0));
 
   heroHorizon.textContent = `${horizon} мес`;
 
@@ -606,7 +540,7 @@ function renderDashboard(calculations) {
             <div>
               <p class="panel-kicker">Main chart</p>
               <h2>Оборот по месяцам</h2>
-              <p>Профиль ${profile.name}. Календарная выручка двух воронок в рамках 2026 года.</p>
+              <p>Профиль ${profile.name}. Чистая выручка после Stripe и корректировок по первому платежу.</p>
             </div>
             <div class="chart-total">
               <span>Итого за 2026</span>
@@ -624,7 +558,7 @@ function renderDashboard(calculations) {
             <div>
               <p class="panel-kicker">Profit chart</p>
               <h2>Прибыль по месяцам</h2>
-              <p>Оборот минус рекламный кост по календарным месяцам для текущего профиля.</p>
+              <p>Оборот минус рекламный бюджет по календарным месяцам.</p>
             </div>
             <div class="chart-total">
               <span>Итого за 2026</span>
@@ -646,7 +580,7 @@ function renderDashboard(calculations) {
               <p class="panel-kicker">Summary</p>
               <h2>Итоговые метрики</h2>
             </div>
-            <p class="panel-note">Главная сводка по двум воронкам и общему горизонту модели.</p>
+            <p class="panel-note">Сводка по текущему профилю и двум воронкам.</p>
           </div>
           <div class="summary-grid"></div>
         </section>
@@ -657,7 +591,7 @@ function renderDashboard(calculations) {
               <p class="panel-kicker">Monthly table</p>
               <h2>Помесячный итог</h2>
             </div>
-            <p class="panel-note">Оборот и прибыль по календарным месяцам.</p>
+            <p class="panel-note">Чистый оборот и прибыль по календарным месяцам.</p>
           </div>
           <div class="table-wrap">
             <table>
@@ -669,17 +603,13 @@ function renderDashboard(calculations) {
                 </tr>
               </thead>
               <tbody>
-                ${combinedRevenue
-                  .map(
-                    (revenue, index) => `
-                      <tr>
-                        <td>${MONTHS[index]}</td>
-                        <td>${formatMoney(revenue)}</td>
-                        <td class="${combinedProfit[index] >= 0 ? "value-positive" : "value-negative"}">${formatMoney(combinedProfit[index])}</td>
-                      </tr>
-                    `,
-                  )
-                  .join("")}
+                ${combinedRevenue.map((revenue, index) => `
+                  <tr>
+                    <td>${MONTHS[index]}</td>
+                    <td>${formatMoney(revenue)}</td>
+                    <td class="${combinedProfit[index] >= 0 ? "value-positive" : "value-negative"}">${formatMoney(combinedProfit[index])}</td>
+                  </tr>
+                `).join("")}
               </tbody>
             </table>
           </div>
@@ -690,33 +620,16 @@ function renderDashboard(calculations) {
 
   renderMetricCards(dashboardScreen.querySelector(".dashboard-header"), [
     { label: "Оборот 2026", value: formatMoney(totalRevenue) },
-    { label: "Рекламный бюджет", value: formatMoney(totalBudget) },
-    {
-      label: "Прибыль после рекламы",
-      value: formatMoney(totalProfit),
-      tone: totalProfit >= 0 ? "positive" : "negative",
-    },
-    { label: "Lifetime revenue", value: formatMoney(totalLifetimeRevenue) },
+    { label: "Бюджет 2026", value: formatMoney(totalBudget) },
+    { label: "Прибыль 2026", value: formatMoney(totalProfit), tone: totalProfit >= 0 ? "positive" : "negative" },
+    { label: "Профиль", value: profile.name },
   ]);
 
   renderMetricCards(dashboardScreen.querySelector(".summary-grid"), [
-    {
-      label: "Воронка 19.89",
-      value: formatMoney(calculations[0].totalRevenue2026),
-    },
-    {
-      label: "Воронка $1 -> $39",
-      value: formatMoney(calculations[1].totalRevenue2026),
-    },
-    {
-      label: "Общая прибыль",
-      value: formatMoney(totalProfit),
-      tone: totalProfit >= 0 ? "positive" : "negative",
-    },
-    {
-      label: "Профиль",
-      value: profile.name,
-    },
+    { label: "Воронка 19.89", value: formatMoney(calculations[0].totalRevenue2026) },
+    { label: "Воронка $1 -> $39", value: formatMoney(calculations[1].totalRevenue2026) },
+    { label: "Income год", value: formatMoney(calculations[0].incomeYearTotal + calculations[1].incomeYearTotal) },
+    { label: "Horizon", value: `${horizon} мес` },
   ]);
 }
 
@@ -726,19 +639,11 @@ function renderSettings(calculations) {
   settingsScreen.innerHTML = `
     <div class="settings-shell">
       <div class="funnel-tabs">
-        ${funnels
-          .map(
-            (funnel) => `
-              <button
-                class="funnel-switch ${uiState.selectedFunnelId === funnel.id ? "is-active" : ""}"
-                data-funnel-tab="${funnel.id}"
-                type="button"
-              >
-                ${funnel.label}
-              </button>
-            `,
-          )
-          .join("")}
+        ${funnels.map((funnel) => `
+          <button class="funnel-switch ${uiState.selectedFunnelId === funnel.id ? "is-active" : ""}" data-funnel-tab="${funnel.id}" type="button">
+            ${funnel.label}
+          </button>
+        `).join("")}
       </div>
       <div id="funnel-screens"></div>
     </div>
@@ -766,22 +671,18 @@ function renderSettings(calculations) {
       input.dataset.funnelIndex = index;
     });
 
-    renderMonthPlanRows(funnels, index, node.querySelector("[data-month-plan]"));
-    renderRetentionFields(funnels, index, node.querySelector("[data-retention-grid]"));
+    renderMonthPlanRows(calculation, funnel, node.querySelector("[data-month-plan]"));
+    renderRetentionFields(index, funnels, node.querySelector("[data-retention-grid]"));
 
     renderMetricCards(node.querySelector("[data-funnel-metrics]"), [
+      { label: "Income0", value: formatMoney(calculation.cohortRows[0]?.income0 ?? 0) },
+      { label: "Income01", value: formatMoney(calculation.cohortRows[0]?.income01 ?? 0) },
+      { label: "Income012", value: formatMoney(calculation.cohortRows[0]?.income012 ?? 0) },
+      { label: "Income год", value: formatMoney(calculation.cohortRows[0]?.incomeYear ?? 0) },
       { label: "Выручка 2026", value: formatMoney(calculation.totalRevenue2026) },
       { label: "Бюджет", value: formatMoney(calculation.totalBudget) },
-      {
-        label: "Прибыль",
-        value: formatMoney(calculation.totalProfit2026),
-        tone: calculation.totalProfit2026 >= 0 ? "positive" : "negative",
-      },
+      { label: "Прибыль", value: formatMoney(calculation.totalProfit2026), tone: calculation.totalProfit2026 >= 0 ? "positive" : "negative" },
       { label: "CAC / первая оплата", value: formatMoneyPrecise(calculation.avgCAC) },
-      { label: "Lifetime revenue", value: formatMoney(calculation.totalLifetimeRevenue) },
-      { label: "Первые оплаты", value: formatNumber(calculation.totalFirstPayments) },
-      { label: "LTV / первая оплата", value: formatMoneyPrecise(calculation.avgRevenuePerPayment) },
-      { label: "Retention 2-10 среднее", value: formatPercent(average(funnel.retentionConversions)) },
     ]);
 
     renderCohortRows(node.querySelector("[data-cohort-results]"), calculation);
@@ -797,9 +698,15 @@ function syncScreenState() {
   });
 }
 
+function renderProfileControls() {
+  profileSelect.innerHTML = state.profiles
+    .map((profile) => `<option value="${profile.id}" ${profile.id === state.selectedProfileId ? "selected" : ""}>${profile.name}</option>`)
+    .join("");
+  deleteProfileButton.disabled = state.profiles.length <= 1;
+}
+
 function render() {
-  const funnels = getCurrentFunnels();
-  const calculations = funnels.map((funnel) => calculateFunnel(funnel));
+  const calculations = getCurrentFunnels().map((funnel) => calculateFunnel(funnel));
   renderProfileControls();
   renderDashboard(calculations);
   renderSettings(calculations);
@@ -818,10 +725,16 @@ function updateField(funnelIndex, field, value) {
   }
 
   const numericFields = [
-    "firstPrice",
-    "recurringPrice",
+    "budgetStart",
+    "budgetEnd",
+    "cac",
+    "avgCheck",
+    "subscriptionPrice",
     "trialConversion",
     "month1Conversion",
+    "stripeFee",
+    "refundRate",
+    "authorRate",
     "horizonMonths",
   ];
 
@@ -832,9 +745,7 @@ function updateField(funnelIndex, field, value) {
 
 function addProfile() {
   const name = window.prompt("Имя нового профиля", `Профиль ${state.profiles.length + 1}`);
-  if (!name || !name.trim()) {
-    return;
-  }
+  if (!name || !name.trim()) return;
 
   const currentProfile = getCurrentProfile();
   const profile = {
@@ -850,15 +761,9 @@ function addProfile() {
 }
 
 function deleteCurrentProfile() {
-  if (state.profiles.length <= 1) {
-    return;
-  }
-
+  if (state.profiles.length <= 1) return;
   const profile = getCurrentProfile();
-  const confirmed = window.confirm(`Удалить профиль "${profile.name}"?`);
-  if (!confirmed) {
-    return;
-  }
+  if (!window.confirm(`Удалить профиль "${profile.name}"?`)) return;
 
   state.profiles = state.profiles.filter((item) => item.id !== profile.id);
   state.selectedProfileId = state.profiles[0].id;
@@ -867,16 +772,8 @@ function deleteCurrentProfile() {
 }
 
 async function fetchSharedState() {
-  const response = await fetch("/api/config", {
-    headers: {
-      Accept: "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Load failed: ${response.status}`);
-  }
-
+  const response = await fetch("/api/config", { headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`Load failed: ${response.status}`);
   return response.json();
 }
 
@@ -889,33 +786,18 @@ async function persistSharedState(reason = "autosave") {
   latestSaveRequestId += 1;
   const requestId = latestSaveRequestId;
   saveNowButton.disabled = true;
-  setSaveUi(
-    "Сохранение…",
-    reason === "manual"
-      ? "Отправляю изменения в общую базу."
-      : "Изменения автоматически сохраняются для всей команды.",
-  );
+  setSaveUi("Сохранение…", reason === "manual" ? "Отправляю изменения в общую базу." : "Изменения автоматически сохраняются для всей команды.");
 
   try {
     const response = await fetch("/api/config", {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        payload: serializeState(),
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload: serializeState() }),
     });
-
-    if (!response.ok) {
-      throw new Error(`Save failed: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Save failed: ${response.status}`);
 
     const result = await response.json();
-    if (requestId < latestAppliedSaveId) {
-      return;
-    }
-
+    if (requestId < latestAppliedSaveId) return;
     latestAppliedSaveId = requestId;
     setSaveUi("Сохранено", formatTimestamp(result.updatedAt));
   } catch (error) {
@@ -927,13 +809,8 @@ async function persistSharedState(reason = "autosave") {
 }
 
 function scheduleSave() {
-  if (isBootstrapping) {
-    return;
-  }
-
-  if (pendingSaveTimer) {
-    clearTimeout(pendingSaveTimer);
-  }
+  if (isBootstrapping) return;
+  if (pendingSaveTimer) clearTimeout(pendingSaveTimer);
 
   saveNowButton.disabled = false;
   setSaveUi("Есть несохраненные изменения", "Через секунду обновлю общую базу данных.");
@@ -944,9 +821,7 @@ function scheduleSave() {
 
 document.addEventListener("change", (event) => {
   const target = event.target;
-  if (!(target instanceof HTMLInputElement)) {
-    return;
-  }
+  if (!(target instanceof HTMLInputElement)) return;
 
   if (target.dataset.field) {
     updateField(Number(target.dataset.funnelIndex), target.dataset.field, target.value);
@@ -956,37 +831,20 @@ document.addEventListener("change", (event) => {
   }
 
   const funnelIndex = Number(target.dataset.funnelIndex);
-  const monthIndex = Number(target.dataset.monthIndex);
   const retentionIndex = Number(target.dataset.retentionIndex);
   const funnel = getCurrentFunnels()[funnelIndex];
+  if (!funnel) return;
 
-  if (!funnel) {
-    return;
+  if (target.dataset.action === "retention") {
+    funnel.retentionConversions[retentionIndex] = clampPercent(target.value);
+    render();
+    scheduleSave();
   }
-
-  switch (target.dataset.action) {
-    case "volume":
-      funnel.monthlyVolume[monthIndex] = clampPositive(target.value);
-      break;
-    case "budget":
-      funnel.monthlyBudget[monthIndex] = clampPositive(target.value);
-      break;
-    case "retention":
-      funnel.retentionConversions[retentionIndex] = clampPercent(target.value);
-      break;
-    default:
-      return;
-  }
-
-  render();
-  scheduleSave();
 });
 
 document.addEventListener("click", (event) => {
   const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return;
-  }
+  if (!(target instanceof HTMLElement)) return;
 
   const screenButton = target.closest("[data-screen]");
   if (screenButton instanceof HTMLButtonElement) {
@@ -1008,17 +866,9 @@ profileSelect.addEventListener("change", () => {
   scheduleSave();
 });
 
-addProfileButton.addEventListener("click", () => {
-  addProfile();
-});
-
-deleteProfileButton.addEventListener("click", () => {
-  deleteCurrentProfile();
-});
-
-saveNowButton.addEventListener("click", () => {
-  void persistSharedState("manual");
-});
+addProfileButton.addEventListener("click", addProfile);
+deleteProfileButton.addEventListener("click", deleteCurrentProfile);
+saveNowButton.addEventListener("click", () => { void persistSharedState("manual"); });
 
 async function bootstrap() {
   render();

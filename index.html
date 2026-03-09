@@ -72,20 +72,47 @@
             <input data-field="name" type="text" />
           </label>
           <label>
-            <span>Цена первого платежа, $</span>
-            <input data-field="firstPrice" type="number" min="0" step="0.01" />
+            <span>Бюджет января, $</span>
+            <input data-field="budgetStart" type="number" min="0" step="1000" />
           </label>
           <label>
-            <span>Повторный платеж, $</span>
-            <input data-field="recurringPrice" type="number" min="0" step="0.01" />
+            <span>Бюджет декабря, $</span>
+            <input data-field="budgetEnd" type="number" min="0" step="1000" />
           </label>
           <label>
-            <span>Trial conversion, %</span>
+            <span>CAC, $</span>
+            <input data-field="cac" type="number" min="0" step="0.01" />
+          </label>
+          <label>
+            <span>Средний чек с апсейлами, $</span>
+            <input data-field="avgCheck" type="number" min="0" step="0.01" />
+          </label>
+          <label>
+            <span>Чек подписки, $</span>
+            <input data-field="subscriptionPrice" type="number" min="0" step="0.01" />
+          </label>
+        </div>
+
+        <div class="settings-grid">
+          <label>
+            <span>Конверсия в trial, %</span>
             <input data-field="trialConversion" type="number" min="0" max="100" step="0.1" />
           </label>
           <label>
-            <span>Оплата в 1-й месяц после trial, %</span>
+            <span>Конверсия в первый платеж, %</span>
             <input data-field="month1Conversion" type="number" min="0" max="100" step="0.1" />
+          </label>
+          <label>
+            <span>Stripe со всех транзакций, %</span>
+            <input data-field="stripeFee" type="number" min="0" max="100" step="0.1" />
+          </label>
+          <label>
+            <span>Возвраты по первому платежу, %</span>
+            <input data-field="refundRate" type="number" min="0" max="100" step="0.1" />
+          </label>
+          <label>
+            <span>Автор по первому платежу, %</span>
+            <input data-field="authorRate" type="number" min="0" max="100" step="0.1" />
           </label>
           <label>
             <span>Горизонт расчета, мес.</span>
@@ -96,11 +123,11 @@
         <div class="subpanel">
           <div class="subpanel-heading">
             <div>
-              <h3>План по месяцам</h3>
+              <h3>План бюджета и объема</h3>
               <p>
-                Укажите входящий объем и бюджет по месяцам 2026 года. Если
-                прогноз уже считается как количество первых оплат, поставьте
-                `Trial conversion = 100%` и `Оплата в 1-й месяц = 100%`.
+                Бюджет раскладывается линейно от января к декабрю. Объем
+                привлечения считается как `бюджет / CAC`, затем применяется
+                trial и конверсия в первый платеж.
               </p>
             </div>
           </div>
@@ -109,8 +136,10 @@
               <thead>
                 <tr>
                   <th>Месяц</th>
-                  <th>Входящий объем</th>
                   <th>Рекламный бюджет, $</th>
+                  <th>Привлечения</th>
+                  <th>Trial</th>
+                  <th>Первые оплаты</th>
                 </tr>
               </thead>
               <tbody data-month-plan></tbody>
@@ -144,12 +173,15 @@
               <thead>
                 <tr>
                   <th>Когорта</th>
-                  <th>Поток</th>
-                  <th>Trial</th>
-                  <th>Первые оплаты</th>
-                  <th>Lifetime revenue, $</th>
-                  <th>Выручка 2026, $</th>
                   <th>Бюджет, $</th>
+                  <th>Привлечения</th>
+                  <th>Первые оплаты</th>
+                  <th>Income0, $</th>
+                  <th>Income01, $</th>
+                  <th>Income012, $</th>
+                  <th>Income год, $</th>
+                  <th>Lifetime, $</th>
+                  <th>Выручка 2026, $</th>
                   <th>Прибыль, $</th>
                 </tr>
               </thead>
