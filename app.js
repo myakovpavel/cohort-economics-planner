@@ -1,4 +1,8 @@
 const MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
+const CALENDAR_24 = Array.from({ length: 24 }, (_, index) => {
+  const year = 2026 + Math.floor(index / 12);
+  return `${MONTHS[index % 12]} ${String(year).slice(2)}`;
+});
 
 const DEFAULT_FUNNELS = [
   {
@@ -93,6 +97,15 @@ function formatNumber(value) {
 
 function formatPercent(value) {
   return `${Number(value).toFixed(1)}%`;
+}
+
+function formatThousands(value) {
+  const sign = value < 0 ? "-" : "";
+  return `${sign}${Math.round(Math.abs(value) / 1000)}K`;
+}
+
+function formatMillions(value) {
+  return `${(value / 1000000).toFixed(1)}M`;
 }
 
 function formatTimestamp(value) {
@@ -279,7 +292,7 @@ function recurringNetPerPayment(funnel) {
 }
 
 function calculateFunnel(funnel) {
-  const calendarRevenue = Array(12).fill(0);
+  const calendarRevenue24 = Array(24).fill(0);
   const monthlyBudgets = buildMonthlyBudgets(funnel);
   const cohortRows = [];
   const horizon = Math.max(12, Math.min(60, Math.round(funnel.horizonMonths)));
@@ -299,7 +312,6 @@ function calculateFunnel(funnel) {
     let incomeYear = income0;
     let lifetimeRevenue = income0;
     let revenue2026 = income0;
-    calendarRevenue[cohortIndex] += income0;
 
     for (let age = 2; age <= horizon; age += 1) {
       activePaid *= retentionForAge(funnel, age);
@@ -318,11 +330,15 @@ function calculateFunnel(funnel) {
       }
 
       const calendarMonth = cohortIndex + age - 1;
-      if (calendarMonth < 12) {
-        calendarRevenue[calendarMonth] += revenue;
-        revenue2026 += revenue;
+      if (calendarMonth < 24) {
+        calendarRevenue24[calendarMonth] += revenue;
+        if (calendarMonth < 12) {
+          revenue2026 += revenue;
+        }
       }
     }
+
+    calendarRevenue24[cohortIndex] += income0;
 
     cohortRows.push({
       cohortLabel: MONTHS[cohortIndex],
@@ -340,18 +356,20 @@ function calculateFunnel(funnel) {
     });
   }
 
-  const totalRevenue2026 = calendarRevenue.reduce((sum, value) => sum + value, 0);
+  const totalRevenue2026 = calendarRevenue24.slice(0, 12).reduce((sum, value) => sum + value, 0);
   const totalBudget = monthlyBudgets.reduce((sum, value) => sum + value, 0);
   const totalLifetimeRevenue = cohortRows.reduce((sum, row) => sum + row.lifetimeRevenue, 0);
   const totalFirstPayments = cohortRows.reduce((sum, row) => sum + row.firstPayments, 0);
-  const monthlyProfit = calendarRevenue.map((revenue, index) => revenue - monthlyBudgets[index]);
+  const monthlyBudget24 = Array.from({ length: 24 }, (_, index) => monthlyBudgets[index] ?? 0);
+  const monthlyProfit24 = calendarRevenue24.map((revenue, index) => revenue - monthlyBudget24[index]);
 
   return {
     horizon,
     monthlyBudgets,
     cohortRows,
-    calendarRevenue,
-    monthlyProfit,
+    calendarRevenue24,
+    monthlyBudget24,
+    monthlyProfit24,
     totalRevenue2026,
     totalBudget,
     totalLifetimeRevenue,
@@ -404,12 +422,15 @@ function buildLineChart(values, color, fillColor) {
       </defs>
       ${grid.map((tick) => `
         <line x1="${padding.left}" x2="${width - padding.right}" y1="${tick.position}" y2="${tick.position}" stroke="rgba(12,13,24,0.08)" stroke-width="1" />
-        <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatMoney(tick.value)}</text>
+        <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatThousands(tick.value)}</text>
       `).join("")}
-      ${MONTHS.map((month, index) => `<text x="${x(index)}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${month}</text>`).join("")}
+      ${CALENDAR_24.map((month, index) => index % 2 === 0 ? `<text x="${x(index)}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="10">${month}</text>` : "").join("")}
       <path d="${areaPath}" fill="url(#${gradientId})"></path>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
-      ${values.map((value, index) => `<circle cx="${x(index)}" cy="${y(value)}" r="4.5" fill="${color}" />`).join("")}
+      ${values.map((value, index) => `
+        <circle cx="${x(index)}" cy="${y(value)}" r="4.5" fill="${color}" />
+        <text x="${x(index)}" y="${y(value) - 12}" text-anchor="middle" fill="${color}" font-size="10" font-weight="700">${formatMillions(value)}</text>
+      `).join("")}
     </svg>
   `;
 }
@@ -442,7 +463,7 @@ function buildBarChart(values) {
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Bar chart">
       ${grid.map((tick) => `
         <line x1="${padding.left}" x2="${width - padding.right}" y1="${tick.position}" y2="${tick.position}" stroke="rgba(12,13,24,0.08)" stroke-width="1" />
-        <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatMoney(tick.value)}</text>
+        <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatThousands(tick.value)}</text>
       `).join("")}
       <line x1="${padding.left}" x2="${width - padding.right}" y1="${zeroY}" y2="${zeroY}" stroke="rgba(12,13,24,0.18)" stroke-width="1.2" />
       ${values.map((value, index) => {
@@ -452,7 +473,8 @@ function buildBarChart(values) {
         const fill = value >= 0 ? "rgba(111, 76, 255, 0.92)" : "rgba(239, 68, 68, 0.92)";
         return `
           <rect x="${x(index)}" y="${barY}" width="${Math.max(barWidth, 8)}" height="${Math.max(heightValue, 2)}" rx="10" fill="${fill}" />
-          <text x="${x(index) + Math.max(barWidth, 8) / 2}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${MONTHS[index]}</text>
+          <text x="${x(index) + Math.max(barWidth, 8) / 2}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="10">${index % 2 === 0 ? CALENDAR_24[index] : ""}</text>
+          <text x="${x(index) + Math.max(barWidth, 8) / 2}" y="${value >= 0 ? barY - 8 : barY + Math.max(heightValue, 2) + 12}" text-anchor="middle" fill="${fill}" font-size="10" font-weight="700">${formatMillions(value)}</text>
         `;
       }).join("")}
     </svg>
@@ -526,8 +548,9 @@ function renderDashboard(calculations) {
   const totalProfit = totalRevenue - totalBudget;
   const horizon = Math.max(...calculations.map((item) => item.horizon));
 
-  const combinedRevenue = Array.from({ length: 12 }, (_, index) => calculations.reduce((sum, item) => sum + item.calendarRevenue[index], 0));
-  const combinedProfit = Array.from({ length: 12 }, (_, index) => calculations.reduce((sum, item) => sum + item.monthlyProfit[index], 0));
+  const combinedRevenue = Array.from({ length: 24 }, (_, index) => calculations.reduce((sum, item) => sum + item.calendarRevenue24[index], 0));
+  const combinedProfit = Array.from({ length: 24 }, (_, index) => calculations.reduce((sum, item) => sum + item.monthlyProfit24[index], 0));
+  const combinedAdCost = Array.from({ length: 24 }, (_, index) => calculations.reduce((sum, item) => sum + item.monthlyBudget24[index], 0));
 
   heroHorizon.textContent = `${horizon} мес`;
 
@@ -540,7 +563,7 @@ function renderDashboard(calculations) {
             <div>
               <p class="panel-kicker">Main chart</p>
               <h2>Оборот по месяцам</h2>
-              <p>Профиль ${profile.name}. Чистая выручка после Stripe и корректировок по первому платежу.</p>
+            <p>Профиль ${profile.name}. Чистая выручка по календарным месяцам на 24 месяца вперед.</p>
             </div>
             <div class="chart-total">
               <span>Итого за 2026</span>
@@ -558,7 +581,7 @@ function renderDashboard(calculations) {
             <div>
               <p class="panel-kicker">Profit chart</p>
               <h2>Прибыль по месяцам</h2>
-              <p>Оборот минус рекламный бюджет по календарным месяцам.</p>
+            <p>Оборот минус рекламный бюджет по календарным месяцам на 24 месяца.</p>
             </div>
             <div class="chart-total">
               <span>Итого за 2026</span>
@@ -591,23 +614,25 @@ function renderDashboard(calculations) {
               <p class="panel-kicker">Monthly table</p>
               <h2>Помесячный итог</h2>
             </div>
-            <p class="panel-note">Чистый оборот и прибыль по календарным месяцам.</p>
+            <p class="panel-note">Чистый оборот, прибыль и рекламный кост по календарным месяцам.</p>
           </div>
-          <div class="table-wrap">
-            <table>
+          <div class="table-wrap compact-table">
+            <table class="compact-table">
               <thead>
                 <tr>
                   <th>Месяц</th>
                   <th>Оборот, $</th>
                   <th>Прибыль, $</th>
+                  <th>Рекламный кост, $</th>
                 </tr>
               </thead>
               <tbody>
                 ${combinedRevenue.map((revenue, index) => `
                   <tr>
-                    <td>${MONTHS[index]}</td>
+                    <td>${CALENDAR_24[index]}</td>
                     <td>${formatMoney(revenue)}</td>
                     <td class="${combinedProfit[index] >= 0 ? "value-positive" : "value-negative"}">${formatMoney(combinedProfit[index])}</td>
+                    <td>${formatMoney(combinedAdCost[index])}</td>
                   </tr>
                 `).join("")}
               </tbody>

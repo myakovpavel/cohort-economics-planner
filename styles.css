@@ -522,6 +522,17 @@ thead th {
   background: rgba(247, 247, 252, 0.92);
 }
 
+.compact-table table,
+table.compact-table {
+  min-width: 520px;
+}
+
+.compact-table th,
+.compact-table td {
+  padding: 9px 10px;
+  font-size: 12px;
+}
+
 tbody tr:last-child td {
   border-bottom: none;
 }
