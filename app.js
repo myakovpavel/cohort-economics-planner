@@ -17,7 +17,7 @@ const DEFAULT_STATE = {
   funnels: [
     {
       id: "core",
-      label: "Воронка A",
+      label: "Воронка 19.89",
       note: "Базовая подписка с первым платежом 19.89 и тем же recurring ARPU.",
       name: "19.89 offer",
       firstPrice: 19.89,
@@ -31,7 +31,7 @@ const DEFAULT_STATE = {
     },
     {
       id: "upsell",
-      label: "Воронка B",
+      label: "Воронка $1 -> $39",
       note: "Первый платеж 1 доллар, затем 39 долларов в recurring.",
       name: "$1 -> $39",
       firstPrice: 1,
@@ -46,12 +46,20 @@ const DEFAULT_STATE = {
   ],
 };
 
+const uiState = {
+  screen: "dashboard",
+  selectedFunnelId: "core",
+};
+
 const state = structuredClone(DEFAULT_STATE);
-const app = document.querySelector("#app");
+
+const dashboardScreen = document.querySelector("#dashboard-screen");
+const settingsScreen = document.querySelector("#settings-screen");
 const heroHorizon = document.querySelector("#hero-horizon");
 const saveStatus = document.querySelector("#save-status");
 const saveMeta = document.querySelector("#save-meta");
 const saveNowButton = document.querySelector("#save-now");
+const screenTabs = document.querySelector("#screen-tabs");
 
 let isBootstrapping = true;
 let pendingSaveTimer = null;
@@ -87,7 +95,7 @@ function formatPercent(value) {
 
 function formatTimestamp(value) {
   if (!value) {
-    return "Изменения будут общими для всей команды.";
+    return "Изменения будут доступны всей команде по этой ссылке.";
   }
 
   const date = new Date(value);
@@ -241,11 +249,13 @@ function calculateFunnel(funnel) {
   const totalBudget = funnel.monthlyBudget.reduce((sum, value) => sum + clampPositive(value), 0);
   const totalLifetimeRevenue = cohortRows.reduce((sum, row) => sum + row.lifetimeRevenue, 0);
   const totalFirstPayments = cohortRows.reduce((sum, row) => sum + row.firstPayments, 0);
+  const monthlyProfit = calendarRevenue.map((revenue, index) => revenue - clampPositive(funnel.monthlyBudget[index]));
 
   return {
     horizon,
     cohortRows,
     calendarRevenue,
+    monthlyProfit,
     totalRevenue2026,
     totalBudget,
     totalLifetimeRevenue,
@@ -266,6 +276,139 @@ function renderMetricCards(container, metrics) {
     .join("");
 }
 
+function buildLineChart(values, color, fillColor) {
+  const width = 760;
+  const height = 360;
+  const padding = { top: 18, right: 22, bottom: 42, left: 62 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(...values, 1);
+  const ticks = 4;
+
+  const x = (index) =>
+    padding.left + (innerWidth / Math.max(values.length - 1, 1)) * index;
+  const y = (value) =>
+    padding.top + innerHeight - (value / maxValue) * innerHeight;
+
+  const linePath = values
+    .map((value, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(value)}`)
+    .join(" ");
+
+  const areaPath = `${linePath} L ${x(values.length - 1)} ${padding.top + innerHeight} L ${x(0)} ${padding.top + innerHeight} Z`;
+
+  const grid = Array.from({ length: ticks + 1 }, (_, index) => {
+    const ratio = index / ticks;
+    const value = maxValue * (1 - ratio);
+    const position = padding.top + innerHeight * ratio;
+    return {
+      value,
+      position,
+    };
+  });
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Line chart">
+      <defs>
+        <linearGradient id="area-${color.replace(/[^a-z0-9]/gi, "")}" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="${fillColor}" />
+          <stop offset="100%" stop-color="rgba(255,255,255,0)" />
+        </linearGradient>
+      </defs>
+      ${grid
+        .map(
+          (tick) => `
+            <line x1="${padding.left}" x2="${width - padding.right}" y1="${tick.position}" y2="${tick.position}" stroke="rgba(12,13,24,0.08)" stroke-width="1" />
+            <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatMoney(tick.value)}</text>
+          `,
+        )
+        .join("")}
+      ${MONTHS.map(
+        (month, index) => `
+          <text x="${x(index)}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${month}</text>
+        `,
+      ).join("")}
+      <path d="${areaPath}" fill="url(#area-${color.replace(/[^a-z0-9]/gi, "")})"></path>
+      <path d="${linePath}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+      ${values
+        .map(
+          (value, index) => `
+            <circle cx="${x(index)}" cy="${y(value)}" r="4.5" fill="${color}" />
+          `,
+        )
+        .join("")}
+    </svg>
+  `;
+}
+
+function buildBarChart(values) {
+  const width = 760;
+  const height = 360;
+  const padding = { top: 18, right: 22, bottom: 42, left: 62 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const minValue = Math.min(...values, 0);
+  const maxValue = Math.max(...values, 0, 1);
+  const range = maxValue - minValue || 1;
+  const zeroY = padding.top + ((maxValue - 0) / range) * innerHeight;
+  const barWidth = innerWidth / values.length - 12;
+  const gridTicks = 4;
+
+  const y = (value) => padding.top + ((maxValue - value) / range) * innerHeight;
+  const x = (index) => padding.left + (innerWidth / values.length) * index + 6;
+
+  const grid = Array.from({ length: gridTicks + 1 }, (_, index) => {
+    const ratio = index / gridTicks;
+    const value = maxValue - range * ratio;
+    const position = padding.top + innerHeight * ratio;
+    return { value, position };
+  });
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Bar chart">
+      ${grid
+        .map(
+          (tick) => `
+            <line x1="${padding.left}" x2="${width - padding.right}" y1="${tick.position}" y2="${tick.position}" stroke="rgba(12,13,24,0.08)" stroke-width="1" />
+            <text x="${padding.left - 10}" y="${tick.position + 4}" text-anchor="end" fill="#5d6073" font-size="11">${formatMoney(tick.value)}</text>
+          `,
+        )
+        .join("")}
+      <line x1="${padding.left}" x2="${width - padding.right}" y1="${zeroY}" y2="${zeroY}" stroke="rgba(12,13,24,0.18)" stroke-width="1.2" />
+      ${values
+        .map((value, index) => {
+          const currentY = y(Math.max(value, 0));
+          const heightValue = Math.abs(y(value) - zeroY);
+          const barY = value >= 0 ? currentY : zeroY;
+          const fill = value >= 0 ? "rgba(111, 76, 255, 0.92)" : "rgba(239, 68, 68, 0.92)";
+          return `
+            <rect x="${x(index)}" y="${barY}" width="${Math.max(barWidth, 8)}" height="${Math.max(heightValue, 2)}" rx="10" fill="${fill}" />
+            <text x="${x(index) + Math.max(barWidth, 8) / 2}" y="${height - 14}" text-anchor="middle" fill="#5d6073" font-size="11">${MONTHS[index]}</text>
+          `;
+        })
+        .join("")}
+    </svg>
+  `;
+}
+
+function renderCohortRows(tbody, calculation) {
+  tbody.innerHTML = calculation.cohortRows
+    .map(
+      (row) => `
+      <tr>
+        <td>${row.cohortLabel}</td>
+        <td>${formatNumber(row.incoming)}</td>
+        <td>${formatNumber(row.trialCount)}</td>
+        <td>${formatNumber(row.firstPayments)}</td>
+        <td>${formatMoney(row.lifetimeRevenue)}</td>
+        <td>${formatMoney(row.revenue2026)}</td>
+        <td>${formatMoney(row.budget)}</td>
+        <td class="${row.profit >= 0 ? "value-positive" : "value-negative"}">${formatMoney(row.profit)}</td>
+      </tr>
+    `,
+    )
+    .join("");
+}
+
 function renderMonthPlanRows(funnelIndex, tbody) {
   tbody.innerHTML = MONTHS.map(
     (month, monthIndex) => `
@@ -273,7 +416,6 @@ function renderMonthPlanRows(funnelIndex, tbody) {
         <td>${month}</td>
         <td>
           <input
-            class="month-input"
             data-action="volume"
             data-funnel-index="${funnelIndex}"
             data-month-index="${monthIndex}"
@@ -285,7 +427,6 @@ function renderMonthPlanRows(funnelIndex, tbody) {
         </td>
         <td>
           <input
-            class="budget-input"
             data-action="budget"
             data-funnel-index="${funnelIndex}"
             data-month-index="${monthIndex}"
@@ -307,7 +448,6 @@ function renderRetentionFields(funnelIndex, container) {
       <label>
         <span>Оплата в ${monthNumber}-й месяц, %</span>
         <input
-          class="retention-input"
           data-action="retention"
           data-funnel-index="${funnelIndex}"
           data-retention-index="${offset}"
@@ -322,131 +462,178 @@ function renderRetentionFields(funnelIndex, container) {
   }).join("");
 }
 
-function renderCohortRows(tbody, calculation) {
-  tbody.innerHTML = calculation.cohortRows
-    .map(
-      (row) => `
-      <tr>
-        <td>${row.cohortLabel}</td>
-        <td>${formatNumber(row.incoming)}</td>
-        <td>${formatNumber(row.trialCount)}</td>
-        <td>${formatNumber(row.firstPayments)}</td>
-        <td>${formatMoney(row.lifetimeRevenue)}</td>
-        <td>${formatMoney(row.revenue2026)}</td>
-        <td>${formatMoney(row.budget)}</td>
-        <td class="${row.profit >= 0 ? "positive" : "negative"}">${formatMoney(row.profit)}</td>
-      </tr>
-    `,
-    )
-    .join("");
-}
-
-function buildSummaryPanel(calculations) {
+function renderDashboard(calculations) {
   const totalRevenue = calculations.reduce((sum, item) => sum + item.totalRevenue2026, 0);
   const totalBudget = calculations.reduce((sum, item) => sum + item.totalBudget, 0);
   const totalProfit = totalRevenue - totalBudget;
-  const totalLifetimeRevenue = calculations.reduce(
-    (sum, item) => sum + item.totalLifetimeRevenue,
-    0,
-  );
+  const totalLifetimeRevenue = calculations.reduce((sum, item) => sum + item.totalLifetimeRevenue, 0);
   const horizon = Math.max(...calculations.map((item) => item.horizon));
 
-  heroHorizon.textContent = `${horizon} месяца`;
-
-  const combinedCalendar = Array.from({ length: 12 }, (_, index) =>
+  const combinedRevenue = Array.from({ length: 12 }, (_, index) =>
     calculations.reduce((sum, item) => sum + item.calendarRevenue[index], 0),
   );
+  const combinedProfit = Array.from({ length: 12 }, (_, index) =>
+    calculations.reduce((sum, item) => sum + item.monthlyProfit[index], 0),
+  );
 
-  const combinedAverageRevenue = average(combinedCalendar);
+  heroHorizon.textContent = `${horizon} мес`;
 
-  const section = document.createElement("section");
-  section.className = "panel summary-panel";
-  section.innerHTML = `
-    <div class="panel-heading">
-      <div>
-        <p class="panel-kicker">Итог</p>
-        <h2>Сводка по двум воронкам</h2>
+  dashboardScreen.innerHTML = `
+    <div class="dashboard-layout">
+      <div class="dashboard-header"></div>
+      <div class="charts-grid">
+        <article class="chart-card">
+          <div class="chart-header">
+            <div>
+              <p class="panel-kicker">Main chart</p>
+              <h2>Оборот по месяцам</h2>
+              <p>Календарная выручка двух воронок в рамках 2026 года.</p>
+            </div>
+            <div class="chart-total">
+              <span>Итого за 2026</span>
+              <strong>${formatMoney(totalRevenue)}</strong>
+            </div>
+          </div>
+          <div class="chart-shell">${buildLineChart(combinedRevenue, "#6f4cff", "rgba(111,76,255,0.28)")}</div>
+          <div class="chart-legend">
+            <div class="chart-legend-item"><span class="chart-legend-swatch" style="background:#6f4cff"></span>Оборот</div>
+          </div>
+        </article>
+
+        <article class="chart-card">
+          <div class="chart-header">
+            <div>
+              <p class="panel-kicker">Profit chart</p>
+              <h2>Прибыль по месяцам</h2>
+              <p>Оборот минус рекламный кост по календарным месяцам.</p>
+            </div>
+            <div class="chart-total">
+              <span>Итого за 2026</span>
+              <strong class="${totalProfit >= 0 ? "value-positive" : "value-negative"}">${formatMoney(totalProfit)}</strong>
+            </div>
+          </div>
+          <div class="chart-shell">${buildBarChart(combinedProfit)}</div>
+          <div class="chart-legend">
+            <div class="chart-legend-item"><span class="chart-legend-swatch" style="background:#6f4cff"></span>Плюсовые месяцы</div>
+            <div class="chart-legend-item"><span class="chart-legend-swatch" style="background:#ef4444"></span>Минусовые месяцы</div>
+          </div>
+        </article>
       </div>
-      <p class="panel-note">
-        Календарная выручка считается только в рамках 2026 года, а lifetime revenue
-        показывает полный эффект когорт на выбранном горизонте.
-      </p>
+
+      <div class="dashboard-tables">
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Summary</p>
+              <h2>Итоговые метрики</h2>
+            </div>
+            <p class="panel-note">Главная сводка по двум воронкам и общему горизонту модели.</p>
+          </div>
+          <div class="summary-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Monthly table</p>
+              <h2>Помесячный итог</h2>
+            </div>
+            <p class="panel-note">Оборот и прибыль по календарным месяцам.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Месяц</th>
+                  <th>Оборот, $</th>
+                  <th>Прибыль, $</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${combinedRevenue
+                  .map(
+                    (revenue, index) => `
+                      <tr>
+                        <td>${MONTHS[index]}</td>
+                        <td>${formatMoney(revenue)}</td>
+                        <td class="${combinedProfit[index] >= 0 ? "value-positive" : "value-negative"}">${formatMoney(combinedProfit[index])}</td>
+                      </tr>
+                    `,
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </div>
-
-    <div class="summary-grid"></div>
-
-    <div class="subpanel">
-      <div class="subpanel-heading">
-        <div>
-          <h3>Календарная выручка 2026</h3>
-          <p>Выручка в каждом месяце складывается из всех активных когорт двух воронок.</p>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table class="calendar-table">
-          <thead>
-            <tr>
-              <th>Месяц</th>
-              <th>Выручка, $</th>
-              <th>Среднее отклонение</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${combinedCalendar
-              .map((value, index) => {
-                const delta = value - combinedAverageRevenue;
-                return `
-                  <tr>
-                    <td>${MONTHS[index]}</td>
-                    <td>${formatMoney(value)}</td>
-                    <td class="${delta >= 0 ? "positive" : "negative"}">${formatMoney(delta)}</td>
-                  </tr>
-                `;
-              })
-              .join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <p class="footer-note">
-      Логика модели: входящий объем → trial → первая оплата → retention по месяцам 2-10 →
-      статичная конверсия после 10-го месяца. При необходимости можно использовать входящий
-      объем как уже готовые продажи, установив первые две конверсии в 100%.
-    </p>
   `;
 
-  renderMetricCards(section.querySelector(".summary-grid"), [
+  renderMetricCards(dashboardScreen.querySelector(".dashboard-header"), [
+    { label: "Оборот 2026", value: formatMoney(totalRevenue) },
+    { label: "Рекламный бюджет", value: formatMoney(totalBudget) },
     {
-      label: "Суммарная выручка 2026",
-      value: formatMoney(totalRevenue),
+      label: "Прибыль после рекламы",
+      value: formatMoney(totalProfit),
+      tone: totalProfit >= 0 ? "positive" : "negative",
+    },
+    { label: "Lifetime revenue", value: formatMoney(totalLifetimeRevenue) },
+  ]);
+
+  renderMetricCards(dashboardScreen.querySelector(".summary-grid"), [
+    {
+      label: "Воронка 19.89",
+      value: formatMoney(calculations[0].totalRevenue2026),
     },
     {
-      label: "Суммарный бюджет 2026",
-      value: formatMoney(totalBudget),
+      label: "Воронка $1 -> $39",
+      value: formatMoney(calculations[1].totalRevenue2026),
     },
     {
-      label: "Прибыль после бюджета",
+      label: "Общая прибыль",
       value: formatMoney(totalProfit),
       tone: totalProfit >= 0 ? "positive" : "negative",
     },
     {
-      label: "Lifetime revenue когорт",
-      value: formatMoney(totalLifetimeRevenue),
+      label: "Горизонт",
+      value: `${horizon} мес`,
     },
   ]);
-
-  return section;
 }
 
-function render() {
-  app.innerHTML = "";
+function renderSettings(calculations) {
+  settingsScreen.innerHTML = `
+    <div class="settings-shell">
+      <div class="funnel-tabs">
+        ${state.funnels
+          .map(
+            (funnel) => `
+              <button
+                class="funnel-switch ${uiState.selectedFunnelId === funnel.id ? "is-active" : ""}"
+                data-funnel-tab="${funnel.id}"
+                type="button"
+              >
+                ${funnel.label}
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+      <div id="funnel-screens"></div>
+    </div>
+  `;
+
+  const screens = settingsScreen.querySelector("#funnel-screens");
   const template = document.querySelector("#funnel-template");
-  const calculations = state.funnels.map((funnel) => calculateFunnel(funnel));
 
   state.funnels.forEach((funnel, index) => {
     const node = template.content.firstElementChild.cloneNode(true);
     const calculation = calculations[index];
+
+    node.classList.add("funnel-screen");
+    if (uiState.selectedFunnelId !== funnel.id) {
+      node.classList.add("hidden");
+    }
 
     node.querySelector(".panel-kicker").textContent = funnel.label;
     node.querySelector("h2").textContent = funnel.name;
@@ -462,46 +649,38 @@ function render() {
     renderRetentionFields(index, node.querySelector("[data-retention-grid]"));
 
     renderMetricCards(node.querySelector("[data-funnel-metrics]"), [
-      {
-        label: "Выручка 2026",
-        value: formatMoney(calculation.totalRevenue2026),
-      },
-      {
-        label: "Бюджет",
-        value: formatMoney(calculation.totalBudget),
-      },
+      { label: "Выручка 2026", value: formatMoney(calculation.totalRevenue2026) },
+      { label: "Бюджет", value: formatMoney(calculation.totalBudget) },
       {
         label: "Прибыль",
         value: formatMoney(calculation.totalProfit2026),
         tone: calculation.totalProfit2026 >= 0 ? "positive" : "negative",
       },
-      {
-        label: "CAC / первая оплата",
-        value: formatMoneyPrecise(calculation.avgCAC),
-      },
-      {
-        label: "Lifetime revenue",
-        value: formatMoney(calculation.totalLifetimeRevenue),
-      },
-      {
-        label: "Первые оплаты",
-        value: formatNumber(calculation.totalFirstPayments),
-      },
-      {
-        label: "LTV / первая оплата",
-        value: formatMoneyPrecise(calculation.avgRevenuePerPayment),
-      },
-      {
-        label: "Retention 2-10 среднее",
-        value: formatPercent(average(funnel.retentionConversions)),
-      },
+      { label: "CAC / первая оплата", value: formatMoneyPrecise(calculation.avgCAC) },
+      { label: "Lifetime revenue", value: formatMoney(calculation.totalLifetimeRevenue) },
+      { label: "Первые оплаты", value: formatNumber(calculation.totalFirstPayments) },
+      { label: "LTV / первая оплата", value: formatMoneyPrecise(calculation.avgRevenuePerPayment) },
+      { label: "Retention 2-10 среднее", value: formatPercent(average(funnel.retentionConversions)) },
     ]);
 
     renderCohortRows(node.querySelector("[data-cohort-results]"), calculation);
-    app.appendChild(node);
+    screens.appendChild(node);
   });
+}
 
-  app.appendChild(buildSummaryPanel(calculations));
+function syncScreenState() {
+  dashboardScreen.classList.toggle("hidden", uiState.screen !== "dashboard");
+  settingsScreen.classList.toggle("hidden", uiState.screen !== "settings");
+  screenTabs.querySelectorAll("[data-screen]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.screen === uiState.screen);
+  });
+}
+
+function render() {
+  const calculations = state.funnels.map((funnel) => calculateFunnel(funnel));
+  renderDashboard(calculations);
+  renderSettings(calculations);
+  syncScreenState();
 }
 
 function updateField(funnelIndex, field, value) {
@@ -551,9 +730,12 @@ async function persistSharedState(reason = "autosave") {
   latestSaveRequestId += 1;
   const requestId = latestSaveRequestId;
   saveNowButton.disabled = true;
-  setSaveUi("Сохранение…", reason === "manual"
-    ? "Отправляю изменения в общую базу."
-    : "Изменения автоматически сохраняются для всей команды.");
+  setSaveUi(
+    "Сохранение…",
+    reason === "manual"
+      ? "Отправляю изменения в общую базу."
+      : "Изменения автоматически сохраняются для всей команды.",
+  );
 
   try {
     const response = await fetch("/api/config", {
@@ -639,6 +821,26 @@ document.addEventListener("change", (event) => {
 
   render();
   scheduleSave();
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const screenButton = target.closest("[data-screen]");
+  if (screenButton instanceof HTMLButtonElement) {
+    uiState.screen = screenButton.dataset.screen;
+    syncScreenState();
+    return;
+  }
+
+  const funnelButton = target.closest("[data-funnel-tab]");
+  if (funnelButton instanceof HTMLButtonElement) {
+    uiState.selectedFunnelId = funnelButton.dataset.funnelTab;
+    render();
+  }
 });
 
 saveNowButton.addEventListener("click", () => {

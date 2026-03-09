@@ -14,39 +14,38 @@
   </head>
   <body>
     <div class="page-shell">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">Подписочная аналитика 2026</p>
-          <h1>Когортная экономика по двум воронкам</h1>
-          <p class="hero-copy">
-            Планируйте месячные когорты, рекламный бюджет, trial и оплату по
-            месяцам. Сервис считает выручку, удержание и прибыль отдельно по
-            каждой воронке и в сумме.
-          </p>
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="eyebrow">Subscription Cohorts 2026</p>
+          <h1>Cohort Economics Planner</h1>
+          <p class="save-meta">Горизонт модели: <span id="hero-horizon">24 мес</span></p>
         </div>
-        <div class="hero-card">
-          <div class="hero-metric">
-            <span>Горизонт расчета</span>
-            <strong id="hero-horizon">24 месяца</strong>
-          </div>
-          <div class="hero-metric">
-            <span>Календарный период</span>
-            <strong>Январь 2026 - Декабрь 2026</strong>
-          </div>
-          <div class="hero-metric sync-metric">
-            <span>Shared workspace</span>
+        <nav class="screen-tabs" id="screen-tabs">
+          <button class="screen-tab is-active" data-screen="dashboard" type="button">
+            Обзор
+          </button>
+          <button class="screen-tab" data-screen="settings" type="button">
+            Настройки
+          </button>
+        </nav>
+        <div class="sync-card">
+          <div>
+            <span class="sync-label">Shared workspace</span>
             <strong id="save-status">Загрузка…</strong>
             <p id="save-meta" class="save-meta">
               Настройки будут доступны по одной ссылке для всей команды.
             </p>
-            <button id="save-now" class="save-button" type="button">
-              Сохранить сейчас
-            </button>
           </div>
+          <button id="save-now" class="save-button" type="button">
+            Сохранить сейчас
+          </button>
         </div>
       </header>
 
-      <main id="app"></main>
+      <main id="app">
+        <section id="dashboard-screen" class="screen-panel"></section>
+        <section id="settings-screen" class="screen-panel hidden"></section>
+      </main>
     </div>
 
     <template id="funnel-template">
