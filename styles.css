@@ -533,6 +533,16 @@ table.compact-table {
   font-size: 12px;
 }
 
+.compact-matrix table {
+  min-width: 1400px;
+}
+
+.compact-matrix th,
+.compact-matrix td {
+  padding: 7px 8px;
+  font-size: 11px;
+}
+
 tbody tr:last-child td {
   border-bottom: none;
 }

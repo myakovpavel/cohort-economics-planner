@@ -3,6 +3,7 @@ const CALENDAR_24 = Array.from({ length: 24 }, (_, index) => {
   const year = 2026 + Math.floor(index / 12);
   return `${MONTHS[index % 12]} ${String(year).slice(2)}`;
 });
+const LOCAL_STORAGE_KEY = "cohort-economics-planner-state";
 
 const DEFAULT_FUNNELS = [
   {
@@ -129,6 +130,24 @@ function setSaveUi(status, detail) {
   saveMeta.textContent = detail;
 }
 
+function loadLocalState() {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    console.error(error);
+    return null;
+  }
+}
+
+function saveLocalState() {
+  try {
+    window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(serializeState()));
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 function clampPercent(value) {
   return Math.max(0, Math.min(100, Number(value) || 0));
 }
@@ -149,7 +168,9 @@ function interpolateBudget(start, end, index) {
 }
 
 function buildMonthlyBudgets(funnel) {
-  return MONTHS.map((_, index) => interpolateBudget(clampPositive(funnel.budgetStart), clampPositive(funnel.budgetEnd), index));
+  const start = clampPositive(funnel.budgetStart);
+  const end = clampPositive(funnel.budgetEnd);
+  return Array.from({ length: 24 }, (_, index) => (index < 12 ? interpolateBudget(start, end, index) : end));
 }
 
 function normalizeRetention(values, fallbackValues) {
@@ -294,12 +315,13 @@ function recurringNetPerPayment(funnel) {
 function calculateFunnel(funnel) {
   const calendarRevenue24 = Array(24).fill(0);
   const monthlyBudgets = buildMonthlyBudgets(funnel);
+  const cohortPaymentMatrix = Array.from({ length: 24 }, () => Array(24).fill(0));
   const cohortRows = [];
   const horizon = Math.max(12, Math.min(60, Math.round(funnel.horizonMonths)));
   const firstNet = firstNetPerPayment(funnel);
   const recurringNet = recurringNetPerPayment(funnel);
 
-  for (let cohortIndex = 0; cohortIndex < 12; cohortIndex += 1) {
+  for (let cohortIndex = 0; cohortIndex < 24; cohortIndex += 1) {
     const budget = monthlyBudgets[cohortIndex];
     const acquisitions = funnel.cac > 0 ? budget / funnel.cac : 0;
     const trialCount = acquisitions * (clampPercent(funnel.trialConversion) / 100);
@@ -312,6 +334,8 @@ function calculateFunnel(funnel) {
     let incomeYear = income0;
     let lifetimeRevenue = income0;
     let revenue2026 = income0;
+    calendarRevenue24[cohortIndex] += income0;
+    cohortPaymentMatrix[cohortIndex][cohortIndex] = firstPayments;
 
     for (let age = 2; age <= horizon; age += 1) {
       activePaid *= retentionForAge(funnel, age);
@@ -332,16 +356,15 @@ function calculateFunnel(funnel) {
       const calendarMonth = cohortIndex + age - 1;
       if (calendarMonth < 24) {
         calendarRevenue24[calendarMonth] += revenue;
+        cohortPaymentMatrix[cohortIndex][calendarMonth] = activePaid;
         if (calendarMonth < 12) {
           revenue2026 += revenue;
         }
       }
     }
 
-    calendarRevenue24[cohortIndex] += income0;
-
     cohortRows.push({
-      cohortLabel: MONTHS[cohortIndex],
+      cohortLabel: CALENDAR_24[cohortIndex],
       budget,
       acquisitions,
       trialCount,
@@ -366,6 +389,7 @@ function calculateFunnel(funnel) {
   return {
     horizon,
     monthlyBudgets,
+    cohortPaymentMatrix,
     cohortRows,
     calendarRevenue24,
     monthlyBudget24,
@@ -502,7 +526,7 @@ function renderCohortRows(tbody, calculation) {
 }
 
 function renderMonthPlanRows(calculation, funnel, tbody) {
-  tbody.innerHTML = MONTHS.map((month, monthIndex) => {
+  tbody.innerHTML = CALENDAR_24.map((month, monthIndex) => {
     const budget = calculation.monthlyBudgets[monthIndex];
     const acquisitions = funnel.cac > 0 ? budget / funnel.cac : 0;
     const trial = acquisitions * (clampPercent(funnel.trialConversion) / 100);
@@ -518,6 +542,39 @@ function renderMonthPlanRows(calculation, funnel, tbody) {
       </tr>
     `;
   }).join("");
+}
+
+function buildCohortMatrix(calculation) {
+  return `
+    <div class="subpanel">
+      <div class="subpanel-heading">
+        <div>
+          <h3>Матрица когорт по месяцам</h3>
+          <p>Строки — когорты запуска, столбцы — календарные месяцы. В ячейках число оплат этой когорты в конкретный месяц.</p>
+        </div>
+      </div>
+      <div class="table-wrap compact-matrix">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Когорта</th>
+              ${CALENDAR_24.map((month) => `<th>${month}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${calculation.cohortRows.map((row, rowIndex) => `
+              <tr>
+                <td>${row.cohortLabel}</td>
+                ${calculation.cohortPaymentMatrix[rowIndex].map((value, columnIndex) => `
+                  <td>${columnIndex < rowIndex || value <= 0 ? "—" : formatNumber(value)}</td>
+                `).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function renderRetentionFields(funnelIndex, funnels, container) {
@@ -543,8 +600,8 @@ function renderRetentionFields(funnelIndex, funnels, container) {
 
 function renderDashboard(calculations) {
   const profile = getCurrentProfile();
-  const totalRevenue = calculations.reduce((sum, item) => sum + item.totalRevenue2026, 0);
-  const totalBudget = calculations.reduce((sum, item) => sum + item.totalBudget, 0);
+  const totalRevenue = calculations.reduce((sum, item) => sum + item.calendarRevenue24.reduce((a, b) => a + b, 0), 0);
+  const totalBudget = calculations.reduce((sum, item) => sum + item.monthlyBudget24.reduce((a, b) => a + b, 0), 0);
   const totalProfit = totalRevenue - totalBudget;
   const horizon = Math.max(...calculations.map((item) => item.horizon));
 
@@ -566,7 +623,7 @@ function renderDashboard(calculations) {
             <p>Профиль ${profile.name}. Чистая выручка по календарным месяцам на 24 месяца вперед.</p>
             </div>
             <div class="chart-total">
-              <span>Итого за 2026</span>
+              <span>Итого за 24 мес</span>
               <strong>${formatMoney(totalRevenue)}</strong>
             </div>
           </div>
@@ -584,7 +641,7 @@ function renderDashboard(calculations) {
             <p>Оборот минус рекламный бюджет по календарным месяцам на 24 месяца.</p>
             </div>
             <div class="chart-total">
-              <span>Итого за 2026</span>
+              <span>Итого за 24 мес</span>
               <strong class="${totalProfit >= 0 ? "value-positive" : "value-negative"}">${formatMoney(totalProfit)}</strong>
             </div>
           </div>
@@ -644,15 +701,15 @@ function renderDashboard(calculations) {
   `;
 
   renderMetricCards(dashboardScreen.querySelector(".dashboard-header"), [
-    { label: "Оборот 2026", value: formatMoney(totalRevenue) },
-    { label: "Бюджет 2026", value: formatMoney(totalBudget) },
-    { label: "Прибыль 2026", value: formatMoney(totalProfit), tone: totalProfit >= 0 ? "positive" : "negative" },
+    { label: "Оборот 24 мес", value: formatMoney(totalRevenue) },
+    { label: "Бюджет 24 мес", value: formatMoney(totalBudget) },
+    { label: "Прибыль 24 мес", value: formatMoney(totalProfit), tone: totalProfit >= 0 ? "positive" : "negative" },
     { label: "Профиль", value: profile.name },
   ]);
 
   renderMetricCards(dashboardScreen.querySelector(".summary-grid"), [
-    { label: "Воронка 19.89", value: formatMoney(calculations[0].totalRevenue2026) },
-    { label: "Воронка $1 -> $39", value: formatMoney(calculations[1].totalRevenue2026) },
+    { label: "Воронка 19.89", value: formatMoney(calculations[0].calendarRevenue24.reduce((a, b) => a + b, 0)) },
+    { label: "Воронка $1 -> $39", value: formatMoney(calculations[1].calendarRevenue24.reduce((a, b) => a + b, 0)) },
     { label: "Income год", value: formatMoney(calculations[0].incomeYearTotal + calculations[1].incomeYearTotal) },
     { label: "Horizon", value: `${horizon} мес` },
   ]);
@@ -704,13 +761,26 @@ function renderSettings(calculations) {
       { label: "Income01", value: formatMoney(calculation.cohortRows[0]?.income01 ?? 0) },
       { label: "Income012", value: formatMoney(calculation.cohortRows[0]?.income012 ?? 0) },
       { label: "Income год", value: formatMoney(calculation.cohortRows[0]?.incomeYear ?? 0) },
-      { label: "Выручка 2026", value: formatMoney(calculation.totalRevenue2026) },
-      { label: "Бюджет", value: formatMoney(calculation.totalBudget) },
-      { label: "Прибыль", value: formatMoney(calculation.totalProfit2026), tone: calculation.totalProfit2026 >= 0 ? "positive" : "negative" },
+      { label: "Выручка 24 мес", value: formatMoney(calculation.calendarRevenue24.reduce((a, b) => a + b, 0)) },
+      { label: "Бюджет 24 мес", value: formatMoney(calculation.monthlyBudget24.reduce((a, b) => a + b, 0)) },
+      {
+        label: "Прибыль 24 мес",
+        value: formatMoney(
+          calculation.calendarRevenue24.reduce((a, b) => a + b, 0) -
+          calculation.monthlyBudget24.reduce((a, b) => a + b, 0),
+        ),
+        tone:
+          calculation.calendarRevenue24.reduce((a, b) => a + b, 0) -
+            calculation.monthlyBudget24.reduce((a, b) => a + b, 0) >=
+          0
+            ? "positive"
+            : "negative",
+      },
       { label: "CAC / первая оплата", value: formatMoneyPrecise(calculation.avgCAC) },
     ]);
 
     renderCohortRows(node.querySelector("[data-cohort-results]"), calculation);
+    node.insertAdjacentHTML("beforeend", buildCohortMatrix(calculation));
     screens.appendChild(node);
   });
 }
@@ -782,6 +852,7 @@ function addProfile() {
   state.profiles.push(profile);
   state.selectedProfileId = profile.id;
   render();
+  saveLocalState();
   scheduleSave();
 }
 
@@ -793,6 +864,7 @@ function deleteCurrentProfile() {
   state.profiles = state.profiles.filter((item) => item.id !== profile.id);
   state.selectedProfileId = state.profiles[0].id;
   render();
+  saveLocalState();
   scheduleSave();
 }
 
@@ -824,10 +896,12 @@ async function persistSharedState(reason = "autosave") {
     const result = await response.json();
     if (requestId < latestAppliedSaveId) return;
     latestAppliedSaveId = requestId;
+    saveLocalState();
     setSaveUi("Сохранено", formatTimestamp(result.updatedAt));
   } catch (error) {
     console.error(error);
-    setSaveUi("Ошибка сохранения", "Проверь подключение к интернету или настройки Cloudflare.");
+    saveLocalState();
+    setSaveUi("Сохранено локально", "На localhost данные и графики обновляются сразу по выбранному профилю.");
   } finally {
     saveNowButton.disabled = false;
   }
@@ -888,6 +962,7 @@ document.addEventListener("click", (event) => {
 profileSelect.addEventListener("change", () => {
   state.selectedProfileId = profileSelect.value;
   render();
+  saveLocalState();
   scheduleSave();
 });
 
@@ -905,13 +980,21 @@ async function bootstrap() {
     if (result?.payload) {
       applyState(result.payload);
       render();
+      saveLocalState();
       setSaveUi("Синхронизировано", formatTimestamp(result.updatedAt));
     } else {
       setSaveUi("База пуста", "Пока загружены стартовые значения. Первое изменение создаст общую запись.");
     }
   } catch (error) {
     console.error(error);
-    setSaveUi("Локальный режим", "Сервер сохранения недоступен. Сейчас значения не шарятся между участниками.");
+    const localState = loadLocalState();
+    if (localState) {
+      applyState(localState);
+      render();
+      setSaveUi("Локальный режим", "Загружены локально сохраненные профили. Переключение профиля сразу обновляет графики.");
+    } else {
+      setSaveUi("Локальный режим", "Сервер сохранения недоступен. Профили и графики будут сохраняться только в этом браузере.");
+    }
   } finally {
     isBootstrapping = false;
     saveNowButton.disabled = false;
